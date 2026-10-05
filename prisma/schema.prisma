@@ -1,0 +1,458 @@
+// La connexion vit désormais dans prisma.config.ts (Prisma 7), plus ici.
+datasource db {
+  provider = "postgresql"
+}
+
+// Prisma 7 remplace "prisma-client-js" par "prisma-client" avec une sortie
+// explicite (le client n'est plus réexporté depuis @prisma/client). Tous
+// les imports applicatifs passent par src/prisma/client.ts, voir ce
+// fichier — un seul endroit à mettre à jour si ce chemin change un jour.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+enum UserRole {
+  TRAVELER
+  HOST
+  ADMIN
+}
+
+enum PropertyType {
+  HOTEL
+  FURNISHED_APARTMENT
+  STUDENT_ROOM
+  GUEST_HOUSE
+}
+
+enum PropertyStatus {
+  PENDING_KYC
+  ACTIVE
+  SUSPENDED
+}
+
+enum VerificationType {
+  NONE
+  EXPRESS_PAID
+  SURPRISE_FREE
+}
+
+enum VerificationTaskStatus {
+  PENDING_ASSIGNMENT
+  COMPLETED
+  REJECTED
+}
+
+enum BookingStatus {
+  NEGOTIATING
+  PENDING_PAYMENT
+  CONFIRMED_ESCROW
+  COMPLETED
+  DISPUTED
+  CANCELLED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  // Une contre-offre remplace la précédente, qui n'est ni acceptée ni
+  // rejetée à proprement parler — juste dépassée par une proposition plus
+  // récente dans le même fil de négociation.
+  SUPERSEDED
+}
+
+enum EscrowStatus {
+  HELD_IN_ESCROW
+  RELEASED_TO_HOST
+  REFUNDED_TO_TRAVELER
+}
+
+enum PaymentMethod {
+  MTN_MOMO
+  ORANGE_MONEY
+  CREDIT_CARD
+}
+
+enum TransactionStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+enum BoostLevel {
+  STANDARD
+  PREMIUM
+}
+
+enum CollaboratorRole {
+  MANAGER
+  AGENT
+}
+
+model User {
+  id            String    @id @default(uuid())
+  fullName      String
+  email         String?   @unique
+  phone         String    @unique
+  // Optionnel : un voyageur inscrit uniquement via Google OAuth n'a jamais
+  // de mot de passe. Avec String (non-nullable), cette inscription plantait
+  // à la création de l'utilisateur.
+  passwordHash  String?
+  googleId      String?   @unique
+  role          UserRole  @default(TRAVELER)
+  // Remplace l'ancien booléen isVerified, qui ne pouvait pas représenter
+  // "en cours d'examen" ni "rejeté, à resoumettre" — nécessaire puisque le
+  // KYC est un processus (soumission -> validation admin), pas un simple
+  // interrupteur. Sans objet pour un TRAVELER (reste NOT_SUBMITTED).
+  kycStatus     KycStatus @default(NOT_SUBMITTED)
+  avatarUrl     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  hostProfile   HostProfile?
+  collaborations PropertyCollaborator[]
+  bookings      Booking[]
+  reviews       Review[]
+  sentMessages  Message[]    @relation("SentMessages")
+  recvMessages  Message[]    @relation("ReceivedMessages")
+  verificationTasks VerificationTask[]
+  kycDocuments  KycDocument[]
+  boostsPurchased PropertyBoost[]
+  priceOffersMade PriceOffer[]
+  refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  favorites     Favorite[]
+
+  // Un utilisateur doit avoir un mot de passe OU un compte Google — jamais
+  // aucun des deux. Cette contrainte n'est pas exprimable en Prisma/SQL
+  // directement : elle est appliquée dans AuthService à la création.
+}
+
+/// On stocke un hash du refresh token (jamais le token en clair) pour
+/// pouvoir le révoquer immédiatement (déconnexion, changement de mot de
+/// passe, compromission suspectée) sans attendre son expiration naturelle.
+/// Sans cette table, un refresh token volé resterait valide jusqu'à son
+/// expiration (7 jours) même après une déconnexion explicite.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
+/// Même principe que RefreshToken : on stocke un hash, jamais le token en
+/// clair, et usedAt empêche la réutilisation d'un lien de réinitialisation
+/// déjà consommé (à usage unique par construction).
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+/// Historique des soumissions KYC de l'hôte. On garde chaque tentative
+/// plutôt que d'écraser un champ unique : un hôte rejeté doit pouvoir
+/// resoumettre, et l'admin doit voir l'historique complet en cas de litige.
+model KycDocument {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idCardUrl         String
+  proofOfAddressUrl String?
+  status            KycStatus @default(PENDING_REVIEW)
+  reviewerNote      String?
+  submittedAt       DateTime  @default(now())
+  reviewedAt        DateTime?
+}
+
+model HostProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio         String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Le justificatif d'identité vit désormais dans KycDocument (avec
+  // l'historique des soumissions), plus ici en champ unique — sinon on a
+  // deux sources de vérité qui peuvent diverger.
+}
+
+// Un établissement physique unique. La propriété/gestion est portée
+// entièrement par PropertyCollaborator (rôle MANAGER = hôte principal,
+// AGENT = collaborateur) — pas de champ hostId séparé ici : en avoir deux
+// (un hostId "propriétaire" ET une liste de collaborateurs) créerait deux
+// sources de vérité qui peuvent diverger sur qui a réellement le droit
+// d'éditer la fiche. Pour trouver l'hôte principal d'un établissement :
+// PropertyCollaborator.findFirst({ where: { propertyId, role: 'MANAGER' } }).
+model Property {
+  id                  String             @id @default(uuid())
+  title               String
+  description         String
+  propertyType        PropertyType
+  city                String
+  quarter             String
+  // Optionnels : les maquettes les affichent, mais on ne bloque pas la
+  // création d'un logement sur des champs que l'hôte ne remplira pas
+  // toujours avec précision — "Cameroun" comme pays par défaut n'aurait
+  // aucun sens à imposer autrement qu'en valeur par défaut applicative,
+  // pas en contrainte de base de données.
+  region              String?
+  country             String?
+  latitude            Float
+  longitude           Float
+  status              PropertyStatus     @default(PENDING_KYC)
+  isVerifiedByAgent   Boolean            @default(false)
+  verificationType    VerificationType   @default(NONE)
+  verifiedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  amenities           PropertyAmenity?
+  photos              PropertyPhoto[]
+  rooms               Room[]
+  collaborators       PropertyCollaborator[]
+  boosts              PropertyBoost[]
+  verificationTasks   VerificationTask[]
+  favorites           Favorite[]
+}
+
+model PropertyCollaborator {
+  id          String           @id @default(uuid())
+  userId      String
+  propertyId  String
+  role        CollaboratorRole @default(AGENT)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property    Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+}
+
+model PropertyAmenity {
+  id                    String   @id @default(uuid())
+  propertyId            String   @unique
+  property              Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  hasWifi               Boolean  @default(false)
+  hasGeneratorOrSolar   Boolean  @default(false) // Indispensable face aux coupures
+  hasAc                 Boolean  @default(false)
+  hasParking            Boolean  @default(false)
+  additionalEquipments  String[]
+}
+
+/// Référence à une photo (URL) — jamais le fichier lui-même. L'origine de
+/// l'URL (hébergement temporaire, cloud storage réel une fois branché)
+/// n'a aucune importance pour ce modèle, exactement comme idCardUrl côté
+/// KYC : c'est une chaîne de caractères, pas un fichier stocké ici.
+model PropertyPhoto {
+  id          String   @id @default(uuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  url         String
+  // Ordre d'affichage dans le carrousel — les maquettes montrent des
+  // galeries ordonnées (1/12, 1/8), pas un ordre arbitraire.
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId, position])
+}
+
+model Room {
+  id            String         @id @default(uuid())
+  propertyId    String
+  property      Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  name          String
+  roomType      String
+  basePrice     Decimal        @db.Decimal(10, 2)
+  maxGuests     Int            @default(1)
+  // Pour un logement "maison entière" à un seul prix (une seule Room
+  // représente alors tout le bien) : nombre de chambres et de lits, tels
+  // qu'affichés sur la fiche. Pour une chambre d'hôtel individuelle,
+  // bedroomCount vaut naturellement 1.
+  bedCount      Int            @default(1)
+  bedroomCount  Int            @default(1)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  availabilities Availability[]
+  bookings       Booking[]
+}
+
+model Availability {
+  id           String   @id @default(uuid())
+  roomId       String
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  date         DateTime @db.Date
+  isAvailable  Boolean  @default(true)
+  customPrice  Decimal? @db.Decimal(10, 2)
+
+  @@unique([roomId, date])
+}
+
+model Booking {
+  id            String        @id @default(uuid())
+  roomId        String
+  room          Room          @relation(fields: [roomId], references: [id])
+  travelerId    String
+  traveler      User          @relation(fields: [travelerId], references: [id])
+  checkInDate   DateTime      @db.Date
+  checkOutDate  DateTime      @db.Date
+  // Null tant que la négociation n'a pas abouti — voir PriceOffer. Ce
+  // champ n'est renseigné qu'au moment où une offre est acceptée par les
+  // deux parties (règle métier explicitement demandée : le prix retenu
+  // est celui que les deux parties ont validé, jamais un prix imposé
+  // unilatéralement).
+  totalPrice    Decimal?      @db.Decimal(10, 2)
+  status        BookingStatus @default(NEGOTIATING)
+  // Double validation post-paiement : le passage à COMPLETED (et donc le
+  // déclenchement du reversement à l'hôte) n'a lieu que lorsque les DEUX
+  // champs sont renseignés — voir BookingsService.maybeComplete. Ni l'un
+  // ni l'autre seul ne suffit, exactement comme pour le prix négocié.
+  travelerConfirmedAt DateTime?
+  hostConfirmedAt     DateTime?
+  // Renseigné uniquement en cas de litige (voir raiseDispute) — gèle la
+  // réservation en DISPUTED sans libérer les fonds, en attendant une
+  // résolution manuelle (arbitrage admin, à construire plus tard).
+  disputeReason       String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  offers        PriceOffer[]
+  escrowVault   EscrowVault?
+  reviews       Review[]
+  messages      Message[]
+}
+
+/// Historique complet des propositions de prix pour une réservation.
+/// Chaque nouvelle offre (contre-proposition) marque la précédente
+/// SUPERSEDED plutôt que de l'écraser — l'historique reste consultable en
+/// cas de litige sur ce qui a été proposé et par qui.
+model PriceOffer {
+  id               String      @id @default(uuid())
+  bookingId        String
+  booking          Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  proposedByUserId String
+  proposedByUser   User        @relation(fields: [proposedByUserId], references: [id])
+  amount           Decimal     @db.Decimal(10, 2)
+  status           OfferStatus @default(PENDING)
+  createdAt        DateTime    @default(now())
+
+  @@index([bookingId])
+}
+
+model EscrowVault {
+  id            String       @id @default(uuid())
+  bookingId     String       @unique
+  booking       Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amountHeld    Decimal      @db.Decimal(10, 2)
+  platformFee   Decimal      @db.Decimal(10, 2) // 10%
+  hostPayout    Decimal      @db.Decimal(10, 2) // 90%
+  status        EscrowStatus @default(HELD_IN_ESCROW)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  transactions  Transaction[]
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  escrowId        String
+  escrowVault     EscrowVault       @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  paymentGatewayId String           @unique
+  paymentMethod   PaymentMethod
+  amount          Decimal           @db.Decimal(10, 2)
+  transactionStatus TransactionStatus @default(PENDING)
+  // Trace complète du webhook reçu — indispensable pour déboguer un
+  // désaccord sur ce que l'agrégateur a réellement envoyé, sans avoir à
+  // le leur redemander.
+  rawWebhookPayload Json?
+  createdAt       DateTime          @default(now())
+}
+
+model PropertyBoost {
+  id                String     @id @default(uuid())
+  propertyId        String
+  property          Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  boostLevel        BoostLevel @default(STANDARD)
+  paidAmount        Decimal    @db.Decimal(10, 2)
+  // Sans ce champ, impossible de savoir qui a payé (donc de rembourser en
+  // cas de litige) ni de vérifier en base que l'achat vient bien d'un
+  // collaborateur MANAGER de cet établissement — règle métier décidée pour
+  // éviter qu'un simple AGENT n'engage les fonds de l'hôtel sans accord.
+  purchasedByUserId String
+  purchasedByUser   User       @relation(fields: [purchasedByUserId], references: [id])
+  startsAt          DateTime
+  expiresAt         DateTime
+  createdAt         DateTime   @default(now())
+
+  @@index([propertyId, expiresAt])
+}
+
+model VerificationTask {
+  id                String                 @id @default(uuid())
+  propertyId        String
+  property          Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agentId           String?
+  agent             User?                  @relation(fields: [agentId], references: [id])
+  requestType       VerificationType
+  status            VerificationTaskStatus @default(PENDING_ASSIGNMENT)
+  inspectionReport  String?
+  photosReportUrl   String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+}
+
+// Logements mis de côté par un utilisateur (étoile). Un logement ne peut être
+// favori qu'une fois par utilisateur ; la suppression du compte ou du
+// logement supprime aussi ses favoris.
+model Favorite {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  rating    Int      // De 1 à 5
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  senderId   String
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId String
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  bookingId  String?
+  booking    Booking? @relation(fields: [bookingId], references: [id])
+  content    String
+  sentAt     DateTime @default(now())
+}
