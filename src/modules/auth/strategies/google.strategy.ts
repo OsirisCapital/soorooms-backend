@@ -24,10 +24,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
 
   validate(_accessToken: string, _refreshToken: string, profile: Profile, done: VerifyCallback) {
     const { id, displayName, emails, photos } = profile;
+    // `verified` n'est pas déclaré dans les types de passport-google-oauth20, mais Google le fournit.
+    const first = emails?.[0] as { value: string; verified?: boolean | string } | undefined;
     done(null, {
       googleId: id,
       fullName: displayName,
-      email: emails?.[0]?.value,
+      email: first?.value,
+      // Sans cette garantie de Google, l'adresse n'est jamais traitée comme prouvée.
+      emailVerified: first?.verified === true || first?.verified === 'true',
       avatarUrl: photos?.[0]?.value,
     });
   }

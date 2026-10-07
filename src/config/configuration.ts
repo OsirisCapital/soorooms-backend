@@ -21,14 +21,28 @@ export interface AppConfig {
     clientSecret: string;
     callbackUrl: string;
   };
+  // Envoi d'e-mails transactionnels via Brevo. Sans clé ou sans adresse d'expédition,
+  // l'application démarre quand même : les e-mails ne partent simplement pas (voir MailService).
+  mail: {
+    brevoApiKey: string;
+    /** Adresse d'expédition : doit être validée dans Brevo (Senders & IP). */
+    fromEmail: string;
+    fromName: string;
+  };
   payment: {
-    // Vides tant que le compte sandbox de l'agrégateur n'est pas prêt —
-    // voir PaymentsService : l'application démarre normalement sans ces
-    // valeurs, seule la route /payments/* échoue explicitement si on
-    // l'appelle avant configuration.
-    aggregatorApiKey: string;
-    webhookSigningSecret: string;
     platformFeePercent: number;
+    // Vides tant que le compte Notch Pay n'est pas configuré : l'application
+    // démarre normalement, seules les routes /payments/* échouent alors avec
+    // un message explicite. Sandbox et production ont des clés différentes —
+    // remplacer les trois ensemble au passage en production.
+    notchpay: {
+      /** pk_… : en-tête Authorization de toutes les requêtes (création et lecture d'un paiement). */
+      publicKey: string;
+      /** Clé privée : en-tête X-Grant, réservée aux opérations sensibles (reversements). */
+      privateKey: string;
+      /** « Hash Key » du webhook : sert uniquement à vérifier la signature des notifications. */
+      hashKey: string;
+    };
   };
 }
 
@@ -48,9 +62,17 @@ export default (): AppConfig => ({
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
     callbackUrl: process.env.GOOGLE_CALLBACK_URL ?? '',
   },
+  mail: {
+    brevoApiKey: process.env.BREVO_API_KEY ?? '',
+    fromEmail: process.env.MAIL_FROM_EMAIL ?? '',
+    fromName: process.env.MAIL_FROM_NAME ?? 'SòôRooms',
+  },
   payment: {
-    aggregatorApiKey: process.env.PAYMENT_AGGREGATOR_API_KEY ?? '',
-    webhookSigningSecret: process.env.PAYMENT_WEBHOOK_SIGNING_SECRET ?? '',
     platformFeePercent: parseInt(process.env.PLATFORM_FEE_PERCENT ?? '10', 10),
+    notchpay: {
+      publicKey: process.env.NOTCHPAY_PUBLIC_KEY ?? '',
+      privateKey: process.env.NOTCHPAY_PRIVATE_KEY ?? '',
+      hashKey: process.env.NOTCHPAY_HASH_KEY ?? '',
+    },
   },
 });

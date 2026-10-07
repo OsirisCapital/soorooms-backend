@@ -21,15 +21,15 @@ export class PaymentsController {
   // @Public(). La sécurité vient de la vérification de signature à
   // l'intérieur du service, pas d'un JWT.
   //
-  // Nom de l'en-tête de signature à CONFIRMER avec la documentation Notch
-  // Pay une fois consultée — x-notchpay-signature est une supposition.
+  // Notch Pay signe le corps brut (HMAC-SHA256, Hash Key) dans l'en-tête
+  // x-notch-signature — voir NotchPayGateway.verifyWebhookSignature.
   @Public()
   @SkipThrottle() // appelé par l'agrégateur depuis ses propres IP : la limite par IP n'a pas de sens ici
   @HttpCode(HttpStatus.OK)
   @Post('webhook')
   webhook(
     @Req() req: RawBodyRequest<Request>,
-    @Headers('x-notchpay-signature') signature: string | undefined,
+    @Headers('x-notch-signature') signature: string | undefined,
   ) {
     if (!req.rawBody) {
       // Ne devrait jamais arriver si rawBody: true est bien positionné

@@ -94,6 +94,10 @@ model User {
   id            String    @id @default(uuid())
   fullName      String
   email         String?   @unique
+  // Renseignée quand le propriétaire a prouvé l'accès à la boîte (lien reçu par e-mail)
+  // ou quand Google l'a garantie. Tant qu'elle est vide, l'adresse n'est PAS fiable :
+  // on ne lui envoie aucun lien de réinitialisation et elle ne bloque personne d'autre.
+  emailVerifiedAt DateTime?
   phone         String    @unique
   // Optionnel : un voyageur inscrit uniquement via Google OAuth n'a jamais
   // de mot de passe. Avec String (non-nullable), cette inscription plantait
@@ -122,6 +126,7 @@ model User {
   priceOffersMade PriceOffer[]
   refreshTokens RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
   favorites     Favorite[]
 
   // Un utilisateur doit avoir un mot de passe OU un compte Google — jamais
@@ -153,6 +158,21 @@ model PasswordResetToken {
   id        String    @id @default(uuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Jeton de vérification d'une adresse e-mail. On garde l'adresse visée : si le compte en change
+/// (ou la perd au profit de son vrai propriétaire), les anciens liens ne valent plus rien.
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
   tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?

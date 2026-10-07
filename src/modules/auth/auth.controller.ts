@@ -14,6 +14,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Put,
   Req,
   Res,
   UseGuards,
@@ -32,6 +33,8 @@ import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { SetEmailDto } from './dto/set-email.dto.js';
+import { VerifyEmailDto } from './dto/verify-email.dto.js';
 import { GoogleAuthGuard, GoogleLoginGuard } from './guards/google-auth.guard.js';
 
 @Controller('auth')
@@ -69,6 +72,32 @@ export class AuthController {
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  // Ouvert à tous : le lien reçu par e-mail s'ouvre souvent sur un autre appareil que celui de l'inscription.
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('verify-email')
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 600_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('resend-verification')
+  resendVerification(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.resendVerification(user.id);
+  }
+
+  // Ajoute ou remplace l'adresse e-mail du compte. Exige le mot de passe actuel, d'où une limite stricte.
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 900_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Put('email')
+  setEmail(@CurrentUser() user: AuthenticatedUser, @Body() dto: SetEmailDto) {
+    return this.authService.setEmail(user.id, dto);
   }
 
   @Public()

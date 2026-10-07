@@ -32,15 +32,31 @@ class EnvironmentVariables {
   @IsString()
   JWT_REFRESH_EXPIRES_IN!: string;
 
-  // Optionnelles : l'application démarre sans elles, seule la route de
-  // paiement échoue explicitement tant qu'elles ne sont pas fournies.
+  // Optionnelles : l'application démarre sans elles, seules les routes de
+  // paiement échouent explicitement tant qu'elles ne sont pas fournies.
   @IsOptional()
   @IsString()
-  PAYMENT_AGGREGATOR_API_KEY?: string;
+  BREVO_API_KEY?: string;
 
   @IsOptional()
   @IsString()
-  PAYMENT_WEBHOOK_SIGNING_SECRET?: string;
+  MAIL_FROM_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  MAIL_FROM_NAME?: string;
+
+  @IsOptional()
+  @IsString()
+  NOTCHPAY_PUBLIC_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  NOTCHPAY_PRIVATE_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  NOTCHPAY_HASH_KEY?: string;
 
   @IsOptional()
   @IsNumberString()
