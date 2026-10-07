@@ -167,9 +167,20 @@ export class PropertiesService {
     const requester = await this.prisma.user.findUnique({ where: { id: requesterId } });
 
     // Le contrôleur garantit déjà que l'appelant est MANAGER de CE
-    // logement (RequireCollaboratorRole) — ici on vérifie la condition
-    // métier propre à la publication : son KYC doit être approuvé.
-    if (requester?.kycStatus !== 'APPROVED') {
+    // logement (RequireCollaboratorRole) — ici on vérifie les conditions
+    // métier propres à la publication.
+    //
+    // 1) Une adresse e-mail vérifiée : un hôte doit pouvoir être joint (confirmations,
+    //    litiges) et son compte récupéré. Contrôlée EN PREMIER car elle se règle en une minute,
+    //    contrairement au KYC qui attend une validation par l'équipe.
+    if (!requester?.emailVerifiedAt) {
+      throw new ForbiddenException(
+        'Vérifiez votre adresse e-mail avant de publier un logement : ouvrez « Mes informations » dans votre profil.',
+      );
+    }
+
+    // 2) Son KYC doit être approuvé.
+    if (requester.kycStatus !== 'APPROVED') {
       throw new ForbiddenException(
         'La publication est bloquée tant que votre vérification KYC n\'est pas approuvée.',
       );
