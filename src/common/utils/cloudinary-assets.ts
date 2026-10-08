@@ -65,6 +65,16 @@ export function isOwnCloudinaryAsset(value: unknown, purpose: AssetPurpose, clou
   return assetPattern(purpose, cloudName).test(value);
 }
 
+/**
+ * Retire la signature « s--xxxxxxxx-- » que Cloudinary ajoute à l'adresse d'un
+ * fichier privé. Avec elle, l'adresse s'ouvre pour n'importe qui, sans limite de
+ * durée ; sans elle, elle ne donne plus accès à rien. On ne garde donc en base
+ * que la forme sans signature : le seul accès est le lien temporaire de l'admin.
+ */
+export function withoutPrivateSignature(url: string): string {
+  return url.replace(/\/s--[A-Za-z0-9_-]{8}--\//, '/');
+}
+
 /** Extrait l'identifiant public et le format d'un document KYC privé ; null pour toute autre URL. */
 export function parsePrivateKycAsset(value: string, cloudName: string): { publicId: string; format: string } | null {
   if (value.length > MAX_URL_LENGTH) return null;

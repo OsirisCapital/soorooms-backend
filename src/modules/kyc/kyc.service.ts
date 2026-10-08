@@ -6,9 +6,11 @@
  * en cas de litige.
  */
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { withoutPrivateSignature } from '../../common/utils/cloudinary-assets.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { RejectKycDto } from './dto/reject-kyc.dto.js';
 import type { SubmitKycDto } from './dto/submit-kyc.dto.js';
+
 
 @Injectable()
 export class KycService {
@@ -28,8 +30,9 @@ export class KycService {
       const document = await tx.kycDocument.create({
         data: {
           userId,
-          idCardUrl: dto.idCardUrl,
-          proofOfAddressUrl: dto.proofOfAddressUrl,
+         // Sans la signature Cloudinary : l'adresse gardée en base n'ouvre rien toute seule.
+          idCardUrl: withoutPrivateSignature(dto.idCardUrl),
+          proofOfAddressUrl: dto.proofOfAddressUrl ? withoutPrivateSignature(dto.proofOfAddressUrl) : undefined,
         },
       });
       await tx.user.update({ where: { id: userId }, data: { kycStatus: 'PENDING_REVIEW' } });

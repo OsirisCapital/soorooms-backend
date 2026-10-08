@@ -5,6 +5,7 @@ import {
   isOwnCloudinaryAsset,
   parsePrivateKycAsset,
   signParams,
+  withoutPrivateSignature,
 } from './cloudinary-assets.js';
 
 const CLOUD = 'demo-cloud';
@@ -108,6 +109,25 @@ describe('parsePrivateKycAsset', () => {
     expect(parsePrivateKycAsset(`https://res.cloudinary.com/${CLOUD}/image/upload/soorooms/kyc/a.jpg`, CLOUD)).toBeNull();
     expect(parsePrivateKycAsset(`https://res.cloudinary.com/${CLOUD}/image/authenticated/soorooms/properties/a.jpg`, CLOUD)).toBeNull();
     expect(parsePrivateKycAsset(`https://res.cloudinary.com/autre/image/authenticated/soorooms/kyc/a.jpg`, CLOUD)).toBeNull();
+  });
+});
+
+describe('withoutPrivateSignature', () => {
+  const signed = `https://res.cloudinary.com/${CLOUD}/image/authenticated/s--AbCd_-12--/v1700000000/soorooms/kyc/cni_01.jpg`;
+  const bare = `https://res.cloudinary.com/${CLOUD}/image/authenticated/v1700000000/soorooms/kyc/cni_01.jpg`;
+
+  it("retire la signature : l'adresse gardée en base n'ouvre plus rien toute seule", () => {
+    expect(withoutPrivateSignature(signed)).toBe(bare);
+  });
+
+  it('laisse intacte une adresse déjà sans signature', () => {
+    expect(withoutPrivateSignature(bare)).toBe(bare);
+  });
+
+  it("reste reconnue comme un document KYC valide, et le lien temporaire de l'admin s'en déduit", () => {
+    const stored = withoutPrivateSignature(signed);
+    expect(isOwnCloudinaryAsset(stored, 'kyc_document', CLOUD)).toBe(true);
+    expect(parsePrivateKycAsset(stored, CLOUD)).toEqual({ publicId: 'soorooms/kyc/cni_01', format: 'jpg' });
   });
 });
 
