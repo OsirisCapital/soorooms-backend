@@ -48,6 +48,10 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  NOTCHPAY_API_URL?: string;
+
+  @IsOptional()
+  @IsString()
   NOTCHPAY_PUBLIC_KEY?: string;
 
   @IsOptional()

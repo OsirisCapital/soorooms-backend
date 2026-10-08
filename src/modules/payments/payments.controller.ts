@@ -1,10 +1,11 @@
-import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/current-user.decorator.js';
 import { Public } from '../../common/decorators/public.decorator.js';
+import { VerifyPaymentDto } from './dto/verify-payment.dto.js';
 import { PaymentsService } from './payments.service.js';
 
 @Controller('payments')
@@ -15,6 +16,20 @@ export class PaymentsController {
   @Post('bookings/:bookingId/initiate')
   initiate(@Param('bookingId') bookingId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.paymentsService.initiate(bookingId, user.id);
+  }
+
+  // Appelé par la page de réservation quand le voyageur revient de la page de paiement. Complète le
+  // webhook (qui peut arriver en retard ou être perdu) : le serveur relit le paiement chez l'agrégateur.
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } }) // la page réessaie pendant un paiement en cours
+  @HttpCode(HttpStatus.OK)
+  @Post('bookings/:bookingId/verify')
+  verify(
+    @Param('bookingId') bookingId: string,
+    @Body() dto: VerifyPaymentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.paymentsService.verifyReturn(bookingId, user.id, dto.reference);
   }
 
   // Appelé par l'agrégateur, jamais par un utilisateur connecté — d'où

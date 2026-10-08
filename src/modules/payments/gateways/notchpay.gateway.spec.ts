@@ -198,9 +198,46 @@ describe('NotchPayGateway — appels à l’API', () => {
       reply(202, { transaction: { reference: 'trx.NOTCH123', status: 'complete', amount: 20000, currency: 'xaf' } }),
     );
     const verified = await makeGateway().verifyPayment('trx.NOTCH123');
-    expect(verified).toEqual({ status: 'SUCCESS', amount: 20000, currency: 'XAF' });
+    expect(verified).toMatchObject({ status: 'SUCCESS', amount: 20000, currency: 'XAF' });
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.notchpay.co/payments/trx.NOTCH123');
     expect(fetchMock.mock.calls[0][1].method).toBe('GET');
+  });
+
+  it('rattache le paiement à une réservation quand notre référence est dans merchant_reference', async () => {
+    fetchMock.mockResolvedValue(
+      reply(202, {
+        transaction: {
+          reference: 'trx.NOTCH123',
+          merchant_reference: `${BOOKING_ID}_lx3k9`,
+          status: 'complete',
+          amount: 20000,
+          currency: 'XAF',
+          channel: 'cm.orange',
+        },
+      }),
+    );
+    const verified = await makeGateway().verifyPayment('trx.NOTCH123');
+    expect(verified).toMatchObject({
+      gatewayRef: 'trx.NOTCH123',
+      bookingReference: BOOKING_ID,
+      paymentMethod: 'ORANGE_MONEY',
+    });
+    expect(verified.raw).toMatchObject({ reference: 'trx.NOTCH123' });
+  });
+
+  it('rattache aussi le paiement quand notre référence est dans « reference »', async () => {
+    fetchMock.mockResolvedValue(
+      reply(202, { transaction: { reference: `${BOOKING_ID}_a1`, status: 'pending', amount: 5000, currency: 'XAF' } }),
+    );
+    const verified = await makeGateway().verifyPayment(`${BOOKING_ID}_a1`);
+    expect(verified).toMatchObject({ status: 'PENDING', bookingReference: BOOKING_ID, gatewayRef: `${BOOKING_ID}_a1` });
+  });
+
+  it('ne rattache AUCUNE réservation quand aucune référence ne ressemble à la nôtre', async () => {
+    fetchMock.mockResolvedValue(
+      reply(202, { transaction: { reference: 'trx.ABC', status: 'complete', amount: 5000, currency: 'XAF' } }),
+    );
+    expect((await makeGateway().verifyPayment('trx.ABC')).bookingReference).toBeUndefined();
   });
 
   it('encode la référence dans l’URL de lecture', async () => {

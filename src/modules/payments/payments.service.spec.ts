@@ -216,3 +216,142 @@ describe('PaymentsService.initiate', () => {
     await expect(service.initiate(BOOKING_ID, 'user-1')).rejects.toThrow(/pas en attente de paiement/);
   });
 });
+
+
+describe('PaymentsService.verifyReturn', () => {
+  const paid = (over: object = {}) => ({
+    status: 'SUCCESS',
+    amount: 20000,
+    currency: 'XAF',
+    gatewayRef: 'trx.1',
+    bookingReference: BOOKING_ID,
+    paymentMethod: 'MTN_MOMO',
+    raw: { reference: 'trx.1' },
+    ...over,
+  });
+
+  const pendingBooking = { id: BOOKING_ID, travelerId: 'user-1', status: 'PENDING_PAYMENT', totalPrice: 20000 };
+
+  /** Configure aussi la relecture finale de la réservation, qui doit refléter le passage en CONFIRMED_ESCROW. */
+  function ready(over: Parameters<typeof setup>[0] = {}) {
+    const ctx = setup({ booking: pendingBooking, verified: paid(), ...over });
+    ctx.prisma.booking.findUnique
+      .mockResolvedValueOnce(pendingBooking)
+      .mockResolvedValue({ ...pendingBooking, status: 'CONFIRMED_ESCROW' });
+    return ctx;
+  }
+
+  it('confirme la réservation quand l’agrégateur dit « payé » pour CETTE réservation, au bon montant', async () => {
+    const { service, tx, gateway } = ready();
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).resolves.toEqual({
+      confirmed: true,
+      paymentStatus: 'SUCCESS',
+      bookingStatus: 'CONFIRMED_ESCROW',
+    });
+    expect(gateway.verifyPayment).toHaveBeenCalledWith('trx.1');
+    expect(tx.transaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        escrowId: 'escrow-1',
+        paymentGatewayId: 'trx.1', // la référence CANONIQUE de l'agrégateur, la même que celle du webhook
+        amount: 20000,
+        transactionStatus: 'SUCCESS',
+        paymentMethod: 'MTN_MOMO',
+      }),
+    });
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, status: 'PENDING_PAYMENT' },
+      data: { status: 'CONFIRMED_ESCROW' },
+    });
+  });
+
+  it('SÉCURITÉ : refuse un paiement qui se rattache à UNE AUTRE réservation', async () => {
+    // Le voyageur a payé une petite réservation et présente cette référence pour en confirmer une plus chère.
+    const { service, prisma } = ready({ verified: paid({ bookingReference: '11111111-2222-4333-8444-555555555555' }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/ne correspond pas à cette réservation/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('SÉCURITÉ : refuse un paiement dont aucune réservation n’est reconnaissable', async () => {
+    const { service, prisma } = ready({ verified: paid({ bookingReference: undefined }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/ne correspond pas à cette réservation/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('SÉCURITÉ : refuse à quelqu’un d’autre que le voyageur', async () => {
+    const { service, gateway } = ready();
+    await expect(service.verifyReturn(BOOKING_ID, 'intrus', 'trx.1')).rejects.toThrow(/Seul le voyageur/);
+    expect(gateway.verifyPayment).not.toHaveBeenCalled();
+  });
+
+  it('ne confirme PAS un montant différent de celui attendu', async () => {
+    const { service, prisma } = ready({ verified: paid({ amount: 100 }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/Montant du paiement différent/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('ne confirme PAS un paiement dans une autre devise', async () => {
+    const { service, prisma } = ready({ verified: paid({ currency: 'EUR' }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/Devise/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('paiement encore en cours : ne conclut pas, n’écrit rien, laisse le frontend réessayer', async () => {
+    const { service, prisma } = ready({ verified: paid({ status: 'PENDING' }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).resolves.toEqual({
+      confirmed: false,
+      paymentStatus: 'PENDING',
+      bookingStatus: 'PENDING_PAYMENT',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('paiement échoué : l’enregistre, ne touche pas à la réservation', async () => {
+    const { service, tx } = ready({ verified: paid({ status: 'FAILED' }) });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).resolves.toEqual({
+      confirmed: false,
+      paymentStatus: 'FAILED',
+      bookingStatus: 'PENDING_PAYMENT',
+    });
+    expect(tx.transaction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ transactionStatus: 'FAILED' }) });
+    expect(tx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ne rétrograde jamais un paiement déjà confirmé par le webhook', async () => {
+    const { service, prisma } = ready({
+      verified: paid({ status: 'FAILED' }),
+      existingTx: { id: 'tx-1', transactionStatus: 'SUCCESS' },
+    });
+    await service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('réservation déjà confirmée (le webhook est arrivé avant) : renvoie le résultat sans interroger l’agrégateur', async () => {
+    const { service, gateway } = setup({ booking: { ...pendingBooking, status: 'CONFIRMED_ESCROW' } });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).resolves.toMatchObject({
+      confirmed: true,
+      bookingStatus: 'CONFIRMED_ESCROW',
+    });
+    expect(gateway.verifyPayment).not.toHaveBeenCalled();
+  });
+
+  it('refuse une réservation annulée ou encore en négociation', async () => {
+    for (const status of ['CANCELLED', 'NEGOTIATING']) {
+      const { service } = setup({ booking: { ...pendingBooking, status } });
+      await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/pas en attente de paiement/);
+    }
+  });
+
+  it('réessayer après un succès déjà enregistré est sans effet néfaste (idempotent)', async () => {
+    const { service, tx } = ready({ existingTx: { id: 'tx-1', transactionStatus: 'SUCCESS' } });
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).resolves.toMatchObject({ confirmed: true });
+    expect(tx.transaction.create).not.toHaveBeenCalled();
+    expect(tx.transaction.update).toHaveBeenCalledTimes(1); // mise à jour, jamais une 2e transaction
+  });
+
+  it('laisse remonter une panne de l’agrégateur sans rien écrire', async () => {
+    const { service, gateway, prisma } = ready();
+    gateway.verifyPayment.mockRejectedValue(new Error('Notch Pay injoignable'));
+    await expect(service.verifyReturn(BOOKING_ID, 'user-1', 'trx.1')).rejects.toThrow(/injoignable/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});

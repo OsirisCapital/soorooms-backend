@@ -64,6 +64,15 @@ export interface VerifiedPayment {
   status: 'SUCCESS' | 'FAILED' | 'PENDING';
   amount: number;
   currency: string;
+  /** Référence canonique du paiement chez l'agrégateur : la même que celle des webhooks, pour que
+   *  les deux chemins (notification et retour du voyageur) reconnaissent un même paiement. */
+  gatewayRef: string;
+  /** Réservation à laquelle ce paiement se rattache, d'après la référence qu'on avait transmise à
+   *  l'initiation ; absente si aucune référence reconnaissable n'a été trouvée. */
+  bookingReference?: string;
+  paymentMethod: PaymentMethod;
+  /** Réponse brute de l'agrégateur, conservée pour l'audit. */
+  raw: unknown;
 }
 
 export const PAYMENT_GATEWAY = Symbol('PAYMENT_GATEWAY');

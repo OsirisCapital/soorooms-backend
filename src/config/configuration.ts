@@ -36,6 +36,8 @@ export interface AppConfig {
     // un message explicite. Sandbox et production ont des clés différentes —
     // remplacer les trois ensemble au passage en production.
     notchpay: {
+      /** Adresse de l'API. Ne change qu'en test (faux serveur Notch Pay) ; vide = https://api.notchpay.co. */
+      apiUrl: string;
       /** pk_… : en-tête Authorization de toutes les requêtes (création et lecture d'un paiement). */
       publicKey: string;
       /** Clé privée : en-tête X-Grant, réservée aux opérations sensibles (reversements). */
@@ -70,6 +72,7 @@ export default (): AppConfig => ({
   payment: {
     platformFeePercent: parseInt(process.env.PLATFORM_FEE_PERCENT ?? '10', 10),
     notchpay: {
+      apiUrl: process.env.NOTCHPAY_API_URL ?? '',
       publicKey: process.env.NOTCHPAY_PUBLIC_KEY ?? '',
       privateKey: process.env.NOTCHPAY_PRIVATE_KEY ?? '',
       hashKey: process.env.NOTCHPAY_HASH_KEY ?? '',

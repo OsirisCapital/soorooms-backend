@@ -36,7 +36,7 @@ import type {
   VerifiedPayment,
 } from '../interfaces/payment-gateway.interface.js';
 
-const API_BASE_URL = 'https://api.notchpay.co';
+const DEFAULT_API_URL = 'https://api.notchpay.co';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** UUID de réservation, éventuellement suivi de « _<suffixe> » (voir InitiatePaymentParams.reference). */
@@ -44,6 +44,19 @@ const BOOKING_REFERENCE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_[0-9a-z]+)?$/i;
 
 type Json = Record<string, unknown>;
+
+/**
+ * Notre référence peut se trouver dans plusieurs champs selon la version du payload : on cherche
+ * celle qui a la forme « <id réservation>[_suffixe] ». Même règle pour les webhooks et pour la
+ * lecture directe d'un paiement.
+ */
+function findBookingReference(data: unknown): { candidates: string[]; bookingId?: string } {
+  const candidates = ['merchant_reference', 'reference', 'trxref', 'id']
+    .map((key) => pickString(data, key))
+    .filter((value): value is string => value !== undefined);
+  const match = candidates.map((value) => BOOKING_REFERENCE.exec(value)).find((m) => m !== null);
+  return { candidates, bookingId: match ? match[1].toLowerCase() : undefined };
+}
 
 function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -108,10 +121,18 @@ export class NotchPayGateway implements PaymentGateway {
       this.logger.error(`Lecture du paiement ${gatewayRef} : réponse inattendue ${JSON.stringify(json).slice(0, 500)}`);
       throw new BadGatewayException('Le service de paiement a renvoyé une réponse inattendue.');
     }
+    const { candidates, bookingId } = findBookingReference(transaction);
     return {
       status: this.statusFrom('', pickString(transaction, 'status')),
       amount: Number(transaction.amount),
       currency: (pickString(transaction, 'currency') ?? '').toUpperCase(),
+      gatewayRef: pickString(transaction, 'reference', 'id') ?? candidates[0] ?? gatewayRef,
+      bookingReference: bookingId,
+      paymentMethod: this.methodFrom(
+        pickString(transaction, 'channel', 'payment_channel') ??
+          (isObject(transaction.payment_method) ? pickString(transaction.payment_method, 'channel', 'type') : undefined),
+      ),
+      raw: transaction,
     };
   }
 
@@ -151,14 +172,9 @@ export class NotchPayGateway implements PaymentGateway {
     const root = isObject(event) && isObject(event.data) ? event.data : {};
     const data = isObject(root.transaction) ? root.transaction : root;
 
-    // Notre référence peut se trouver dans plusieurs champs selon la version
-    // du payload : on cherche celle qui a la forme « <id réservation>[_suffixe] ».
-    const candidates = ['merchant_reference', 'reference', 'trxref', 'id']
-      .map((key) => pickString(data, key))
-      .filter((value): value is string => value !== undefined);
-    const ours = candidates.map((value) => BOOKING_REFERENCE.exec(value)).find((match) => match !== null);
+    const { candidates, bookingId } = findBookingReference(data);
 
-    if (!ours) {
+    if (!bookingId) {
       this.logger.error(
         `Webhook Notch Pay « ${type} » sans référence de réservation reconnaissable : ${rawBody.toString('utf-8').slice(0, 800)}`,
       );
@@ -176,7 +192,7 @@ export class NotchPayGateway implements PaymentGateway {
       status: this.statusFrom(type, pickString(data, 'status')),
       amount: Number(data.amount),
       paymentMethod,
-      bookingReference: ours[1].toLowerCase(),
+      bookingReference: bookingId,
     };
   }
 
@@ -201,7 +217,7 @@ export class NotchPayGateway implements PaymentGateway {
   }
 
   private async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Json> {
-    const { publicKey } = this.keys();
+    const { publicKey, apiUrl } = this.keys();
     if (!publicKey) {
       this.logger.error('NOTCHPAY_PUBLIC_KEY est absente : aucun appel à Notch Pay possible.');
       throw new ServiceUnavailableException("Le paiement n'est pas encore disponible.");
@@ -209,7 +225,7 @@ export class NotchPayGateway implements PaymentGateway {
 
     let response: Response;
     try {
-      response = await fetch(`${API_BASE_URL}${path}`, {
+      response = await fetch(`${apiUrl || DEFAULT_API_URL}${path}`, {
         method,
         headers: {
           Authorization: publicKey,

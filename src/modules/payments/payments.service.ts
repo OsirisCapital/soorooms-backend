@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../../config/configuration.js';
+import type { PaymentMethod } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import {
   PAYMENT_GATEWAY,
@@ -147,31 +148,148 @@ export class PaymentsService {
     // Les événements d'échec ne portent pas toujours un montant exploitable.
     const recordedAmount = Number.isFinite(amount) && amount > 0 ? amount : Number(escrow.amountHeld);
 
-    const payload = JSON.parse(rawBody.toString('utf-8'));
+    await this.applyPayment({
+      escrow,
+      existing,
+      gatewayRef: event.gatewayRef,
+      status: event.status,
+      amount: recordedAmount,
+      paymentMethod: event.paymentMethod,
+      payload: JSON.parse(rawBody.toString('utf-8')),
+    });
+
+    return { processed: true };
+  }
+
+  /**
+   * Vérification au RETOUR du voyageur, sans dépendre d'un webhook : à son retour de la page de
+   * paiement, le frontend nous transmet la référence ; on relit le paiement chez l'agrégateur et on
+   * confirme exactement comme le ferait le webhook (même écriture, même idempotence). C'est aussi
+   * le filet de sécurité d'un webhook perdu ou arrivé pendant que le serveur dormait.
+   *
+   * Sécurité : la référence vient du client, donc elle n'est jamais crue sur parole. Seule compte la
+   * réponse de l'agrégateur, qui doit désigner CETTE réservation (sinon on pourrait payer une petite
+   * réservation et présenter son paiement pour en confirmer une plus chère), au bon montant, en XAF.
+   */
+  async verifyReturn(bookingId: string, userId: string, reference: string) {
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!booking) {
+      throw new NotFoundException('Réservation introuvable.');
+    }
+    if (booking.travelerId !== userId) {
+      throw new ForbiddenException('Seul le voyageur de cette réservation peut vérifier son paiement.');
+    }
+
+    // Le webhook est parfois arrivé avant le retour du voyageur : rien à refaire.
+    if (['CONFIRMED_ESCROW', 'COMPLETED', 'DISPUTED'].includes(booking.status)) {
+      return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: booking.status };
+    }
+    if (booking.status !== 'PENDING_PAYMENT') {
+      throw new ConflictException("Cette réservation n'est pas en attente de paiement.");
+    }
+
+    const verified = await this.gateway.verifyPayment(reference);
+
+    if (verified.bookingReference !== booking.id) {
+      this.logger.error(
+        `Vérification au retour : le paiement ${verified.gatewayRef} se rattache à « ${verified.bookingReference ?? 'aucune réservation reconnaissable'} », pas à ${booking.id}.`,
+      );
+      throw new ForbiddenException('Ce paiement ne correspond pas à cette réservation.');
+    }
+
+    const escrow = await this.prisma.escrowVault.findUnique({ where: { bookingId: booking.id } });
+    if (!escrow) {
+      throw new NotFoundException('Aucun paiement lancé pour cette réservation.');
+    }
+
+    // Paiement encore en cours chez l'opérateur : on ne conclut pas, le frontend réessaiera.
+    if (verified.status === 'PENDING') {
+      return { confirmed: false, paymentStatus: 'PENDING' as const, bookingStatus: booking.status };
+    }
+
+    const existing = await this.prisma.transaction.findUnique({ where: { paymentGatewayId: verified.gatewayRef } });
+    const payload = { source: 'return-verification', transaction: verified.raw };
+
+    if (verified.status === 'FAILED') {
+      // Ne jamais rétrograder un paiement déjà confirmé.
+      if (existing?.transactionStatus !== 'SUCCESS') {
+        await this.applyPayment({
+          escrow,
+          existing,
+          gatewayRef: verified.gatewayRef,
+          status: 'FAILED',
+          amount: Number.isFinite(verified.amount) && verified.amount > 0 ? verified.amount : Number(escrow.amountHeld),
+          paymentMethod: verified.paymentMethod,
+          payload,
+        });
+      }
+      return { confirmed: false, paymentStatus: 'FAILED' as const, bookingStatus: booking.status };
+    }
+
+    if (verified.currency !== 'XAF') {
+      this.logger.error(`Vérification au retour ${verified.gatewayRef} : devise ${verified.currency || 'absente'} au lieu de XAF.`);
+      throw new BadRequestException('Devise du paiement inattendue.');
+    }
+    if (Math.round(verified.amount) !== Math.round(Number(escrow.amountHeld))) {
+      this.logger.error(
+        `Vérification au retour ${verified.gatewayRef} : montant ${verified.amount} ≠ montant attendu ${String(escrow.amountHeld)} (réservation ${booking.id}). Vérification manuelle requise.`,
+      );
+      throw new BadRequestException('Montant du paiement différent du montant attendu.');
+    }
+
+    await this.applyPayment({
+      escrow,
+      existing,
+      gatewayRef: verified.gatewayRef,
+      status: 'SUCCESS',
+      amount: verified.amount,
+      paymentMethod: verified.paymentMethod,
+      payload,
+    });
+
+    const after = await this.prisma.booking.findUnique({ where: { id: booking.id } });
+    return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: after?.status ?? 'CONFIRMED_ESCROW' };
+  }
+
+  /**
+   * Écriture commune au webhook et à la vérification au retour : enregistre (ou met à jour) la
+   * transaction, et, pour un succès, fait avancer la réservation. Idempotente par construction :
+   * `paymentGatewayId` est unique, et la réservation n'avance que depuis PENDING_PAYMENT.
+   */
+  private async applyPayment(params: {
+    escrow: { id: string; bookingId: string };
+    existing: { id: string } | null;
+    gatewayRef: string;
+    status: 'SUCCESS' | 'FAILED' | 'PENDING';
+    amount: number;
+    paymentMethod: PaymentMethod;
+    payload: unknown;
+  }) {
+    const { escrow, existing, gatewayRef, status, amount, paymentMethod, payload } = params;
 
     await this.prisma.$transaction(async (tx) => {
       if (existing) {
         await tx.transaction.update({
           where: { id: existing.id },
-          data: { transactionStatus: event.status, amount: recordedAmount, rawWebhookPayload: payload },
+          data: { transactionStatus: status, amount, rawWebhookPayload: payload as never },
         });
       } else {
         await tx.transaction.create({
           data: {
             escrowId: escrow.id,
-            paymentGatewayId: event.gatewayRef,
-            paymentMethod: event.paymentMethod,
-            amount: recordedAmount,
-            transactionStatus: event.status,
-            rawWebhookPayload: payload,
+            paymentGatewayId: gatewayRef,
+            paymentMethod,
+            amount,
+            transactionStatus: status,
+            rawWebhookPayload: payload as never,
           },
         });
       }
 
-      if (event.status === 'SUCCESS') {
+      if (status === 'SUCCESS') {
         // Les fonds sont désormais capturés et détenus par l'agrégateur
         // (EscrowVault reste HELD_IN_ESCROW). Seule la réservation avance, et
-        // uniquement depuis PENDING_PAYMENT : un webhook tardif ne doit pas
+        // uniquement depuis PENDING_PAYMENT : un événement tardif ne doit pas
         // ressusciter une réservation annulée, en litige ou terminée.
         const moved = await tx.booking.updateMany({
           where: { id: escrow.bookingId, status: 'PENDING_PAYMENT' },
@@ -184,8 +302,6 @@ export class PaymentsService {
         }
       }
     });
-
-    return { processed: true };
   }
 
   /**
