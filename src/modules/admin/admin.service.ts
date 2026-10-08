@@ -5,12 +5,42 @@
  * lecture seule — la résolution (remboursement ou reversement) suppose un
  * appel à l'agrégateur de paiement, pas encore implémenté.
  */
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { UploadsService } from '../uploads/uploads.service.js';
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploads: UploadsService,
+  ) {}
+
+  /**
+   * Lien de consultation d'un document KYC. Chaque consultation est journalisée
+   * (qui, quel document) : ce sont des pièces d'identité, on doit pouvoir dire
+   * qui les a ouvertes. L'URL elle-même n'est jamais écrite dans le journal.
+   */
+  async getKycDocumentLink(adminId: string, documentId: string, kind: string) {
+    if (kind !== 'id-card' && kind !== 'proof-of-address') {
+      throw new BadRequestException("Type de document inconnu : id-card ou proof-of-address.");
+    }
+
+    const document = await this.prisma.kycDocument.findUnique({
+      where: { id: documentId },
+      select: { idCardUrl: true, proofOfAddressUrl: true },
+    });
+    const storedUrl = kind === 'id-card' ? document?.idCardUrl : document?.proofOfAddressUrl;
+    if (!storedUrl) {
+      throw new NotFoundException('Document introuvable.');
+    }
+
+    const link = this.uploads.createViewUrl(storedUrl);
+    this.logger.log(`Document KYC ${documentId} (${kind}) consulté par l'administrateur ${adminId}.`);
+    return link;
+  }
 
   // Les plus anciennes demandes d'abord : on traite dans l'ordre d'arrivée.
   async listPendingKyc() {

@@ -1,10 +1,15 @@
-import { IsOptional, IsUrl } from 'class-validator';
+import { IsOptional } from 'class-validator';
+import { IsCloudinaryAsset } from '../../../common/validators/is-cloudinary-asset.js';
 
 export class SubmitKycDto {
-  @IsUrl({}, { message: "idCardUrl doit être une URL valide vers le justificatif d'identité." })
+  @IsCloudinaryAsset('kyc_document', {
+    message: "idCardUrl doit être un fichier envoyé depuis l'application : choisissez votre pièce d'identité sur votre appareil.",
+  })
   idCardUrl!: string;
 
   @IsOptional()
-  @IsUrl({}, { message: 'proofOfAddressUrl doit être une URL valide.' })
+  @IsCloudinaryAsset('kyc_document', {
+    message: "proofOfAddressUrl doit être un fichier envoyé depuis l'application : choisissez votre justificatif sur votre appareil.",
+  })
   proofOfAddressUrl?: string;
 }
