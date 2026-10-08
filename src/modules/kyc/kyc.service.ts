@@ -5,12 +5,11 @@
  * être resoumis, et l'admin doit pouvoir consulter les tentatives passées
  * en cas de litige.
  */
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { withoutPrivateSignature } from '../../common/utils/cloudinary-assets.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { RejectKycDto } from './dto/reject-kyc.dto.js';
 import type { SubmitKycDto } from './dto/submit-kyc.dto.js';
-
 
 @Injectable()
 export class KycService {
@@ -30,7 +29,7 @@ export class KycService {
       const document = await tx.kycDocument.create({
         data: {
           userId,
-         // Sans la signature Cloudinary : l'adresse gardée en base n'ouvre rien toute seule.
+          // Sans la signature Cloudinary : l'adresse gardée en base n'ouvre rien toute seule.
           idCardUrl: withoutPrivateSignature(dto.idCardUrl),
           proofOfAddressUrl: dto.proofOfAddressUrl ? withoutPrivateSignature(dto.proofOfAddressUrl) : undefined,
         },
@@ -48,26 +47,50 @@ export class KycService {
     return { kycStatus: user?.kycStatus, documents };
   }
 
-  async approve(targetUserId: string) {
+  /**
+   * Décision d'un membre de l'équipe. Trois garde-fous :
+   *  - personne ne décide sur sa propre vérification ;
+   *  - la décision n'est prise que si la demande est TOUJOURS en attente au moment de l'écriture
+   *    (deux administrateurs qui cliquent en même temps : un seul l'emporte) ;
+   *  - la décision et son inscription au journal d'audit sont écrites ensemble, ou pas du tout.
+   */
+  async approve(actorId: string, targetUserId: string) {
+    this.assertNotSelf(actorId, targetUserId);
     const pending = await this.findLatestPending(targetUserId);
     return this.prisma.$transaction(async (tx) => {
-      await tx.kycDocument.update({
-        where: { id: pending.id },
+      const { count } = await tx.kycDocument.updateMany({
+        where: { id: pending.id, status: 'PENDING_REVIEW' },
         data: { status: 'APPROVED', reviewedAt: new Date() },
+      });
+      if (count === 0) throw new ConflictException('Cette demande a déjà été traitée.');
+      await tx.auditLog.create({
+        data: { actorId, action: 'kyc.approve', targetType: 'User', targetId: targetUserId, meta: { documentId: pending.id } },
       });
       return tx.user.update({ where: { id: targetUserId }, data: { kycStatus: 'APPROVED' } });
     });
   }
 
-  async reject(targetUserId: string, dto: RejectKycDto) {
+  async reject(actorId: string, targetUserId: string, dto: RejectKycDto) {
+    this.assertNotSelf(actorId, targetUserId);
     const pending = await this.findLatestPending(targetUserId);
     return this.prisma.$transaction(async (tx) => {
-      await tx.kycDocument.update({
-        where: { id: pending.id },
+      const { count } = await tx.kycDocument.updateMany({
+        where: { id: pending.id, status: 'PENDING_REVIEW' },
         data: { status: 'REJECTED', reviewedAt: new Date(), reviewerNote: dto.reviewerNote },
+      });
+      if (count === 0) throw new ConflictException('Cette demande a déjà été traitée.');
+      // Le motif reste sur le document ; le journal ne garde que les identifiants.
+      await tx.auditLog.create({
+        data: { actorId, action: 'kyc.reject', targetType: 'User', targetId: targetUserId, meta: { documentId: pending.id } },
       });
       return tx.user.update({ where: { id: targetUserId }, data: { kycStatus: 'REJECTED' } });
     });
+  }
+
+  private assertNotSelf(actorId: string, targetUserId: string) {
+    if (actorId === targetUserId) {
+      throw new ForbiddenException('Vous ne pouvez pas examiner votre propre vérification.');
+    }
   }
 
   private async findLatestPending(userId: string) {

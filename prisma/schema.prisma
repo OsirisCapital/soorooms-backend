@@ -18,6 +18,16 @@ enum UserRole {
   ADMIN
 }
 
+/// Niveau d'un membre de l'équipe (réservé aux comptes de rôle ADMIN). Il fixe les accès de départ ;
+/// `staffPermissions` en ajoute au cas par cas. Voir src/modules/admin/permissions.ts.
+enum StaffRole {
+  SUPER_ADMIN
+  KYC_REVIEWER
+  SUPPORT
+  FINANCE
+  CONTENT
+}
+
 enum PropertyType {
   HOTEL
   FURNISHED_APARTMENT
@@ -105,6 +115,11 @@ model User {
   passwordHash  String?
   googleId      String?   @unique
   role          UserRole  @default(TRAVELER)
+  // Niveau dans l'équipe d'administration ; vide pour un utilisateur ordinaire. Un ADMIN sans
+  // niveau est traité comme SUPER_ADMIN (compatibilité avec les comptes antérieurs).
+  staffRole     StaffRole?
+  // Accès accordés en plus de ceux du niveau, par exemple "support.manage".
+  staffPermissions String[] @default([])
   // Remplace l'ancien booléen isVerified, qui ne pouvait pas représenter
   // "en cours d'examen" ni "rejeté, à resoumettre" — nécessaire puisque le
   // KYC est un processus (soumission -> validation admin), pas un simple
@@ -128,6 +143,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   favorites     Favorite[]
+  auditLogs     AuditLog[]
 
   // Un utilisateur doit avoir un mot de passe OU un compte Google — jamais
   // aucun des deux. Cette contrainte n'est pas exprimable en Prisma/SQL
@@ -475,4 +491,20 @@ model Message {
   booking    Booking? @relation(fields: [bookingId], references: [id])
   content    String
   sentAt     DateTime @default(now())
+}
+
+/// Journal des actions sensibles de l'équipe (consultation d'un document d'identité, décision KYC,
+/// changement d'accès…). On y écrit QUI a fait QUOI, QUAND — jamais le contenu des documents.
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  targetType String?
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
 }
