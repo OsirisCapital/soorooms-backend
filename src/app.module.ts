@@ -25,6 +25,7 @@ import { PropertiesModule } from './modules/properties/properties.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { SearchModule } from './modules/search/search.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     AdminModule,
     FavoritesModule,
     UploadsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

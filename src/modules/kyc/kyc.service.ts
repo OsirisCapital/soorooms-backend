@@ -8,12 +8,16 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { withoutPrivateSignature } from '../../common/utils/cloudinary-assets.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { RejectKycDto } from './dto/reject-kyc.dto.js';
 import type { SubmitKycDto } from './dto/submit-kyc.dto.js';
 
 @Injectable()
 export class KycService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async submit(userId: string, dto: SubmitKycDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -25,8 +29,8 @@ export class KycService {
       throw new ConflictException('Votre KYC est déjà approuvé.');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const document = await tx.kycDocument.create({
+    const document = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.kycDocument.create({
         data: {
           userId,
           // Sans la signature Cloudinary : l'adresse gardée en base n'ouvre rien toute seule.
@@ -35,8 +39,12 @@ export class KycService {
         },
       });
       await tx.user.update({ where: { id: userId }, data: { kycStatus: 'PENDING_REVIEW' } });
-      return document;
+      return created;
     });
+
+    // Prévient l'équipe habilitée (jamais bloquant : la demande est déjà enregistrée).
+    await this.notifications.notifyStaff('kyc.review', 'KYC_SUBMITTED', { fullName: user?.fullName ?? 'Un utilisateur' }, userId);
+    return document;
   }
 
   async findMine(userId: string) {
@@ -57,7 +65,7 @@ export class KycService {
   async approve(actorId: string, targetUserId: string) {
     this.assertNotSelf(actorId, targetUserId);
     const pending = await this.findLatestPending(targetUserId);
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.kycDocument.updateMany({
         where: { id: pending.id, status: 'PENDING_REVIEW' },
         data: { status: 'APPROVED', reviewedAt: new Date() },
@@ -68,12 +76,14 @@ export class KycService {
       });
       return tx.user.update({ where: { id: targetUserId }, data: { kycStatus: 'APPROVED' } });
     });
+    await this.notifications.notify(targetUserId, 'KYC_APPROVED', {});
+    return updated;
   }
 
   async reject(actorId: string, targetUserId: string, dto: RejectKycDto) {
     this.assertNotSelf(actorId, targetUserId);
     const pending = await this.findLatestPending(targetUserId);
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.kycDocument.updateMany({
         where: { id: pending.id, status: 'PENDING_REVIEW' },
         data: { status: 'REJECTED', reviewedAt: new Date(), reviewerNote: dto.reviewerNote },
@@ -85,6 +95,8 @@ export class KycService {
       });
       return tx.user.update({ where: { id: targetUserId }, data: { kycStatus: 'REJECTED' } });
     });
+    await this.notifications.notify(targetUserId, 'KYC_REJECTED', { reason: dto.reviewerNote });
+    return updated;
   }
 
   private assertNotSelf(actorId: string, targetUserId: string) {

@@ -144,6 +144,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   favorites     Favorite[]
   auditLogs     AuditLog[]
+  notifications Notification[]
 
   // Un utilisateur doit avoir un mot de passe OU un compte Google — jamais
   // aucun des deux. Cette contrainte n'est pas exprimable en Prisma/SQL
@@ -507,4 +508,22 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([actorId])
+}
+
+/// Notification dans l'application (cloche + page « Notifications »). `type` est un identifiant du
+/// catalogue notification-types.ts (texte libre en base pour pouvoir en ajouter sans migration).
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  /// Page de l'application ouverte au toucher (chemin interne uniquement).
+  linkUrl   String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
