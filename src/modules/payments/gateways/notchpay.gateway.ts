@@ -21,6 +21,7 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -58,6 +59,15 @@ function findBookingReference(data: unknown): { candidates: string[]; bookingId?
   return { candidates, bookingId: match ? match[1].toLowerCase() : undefined };
 }
 
+/** Notch Pay a refusé le numéro de téléphone du client (« must be a valid number »). */
+class PhoneRejectedError extends Error {}
+
+/** La réponse 422 de Notch Pay désigne-t-elle un problème de numéro de téléphone ? */
+function mentionsPhone(json: Json): boolean {
+  const errors = isObject(json.errors) ? json.errors : {};
+  return Object.keys(errors).some((key) => /phone/i.test(key));
+}
+
 function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -83,9 +93,37 @@ export class NotchPayGateway implements PaymentGateway {
   // ---------------------------------------------------------------------
 
   async initiatePayment(params: InitiatePaymentParams): Promise<InitiatePaymentResult> {
-    const customer: Json = { name: params.customer.name };
-    if (params.customer.phone) customer.phone = params.customer.phone;
-    if (params.customer.email) customer.email = params.customer.email;
+    try {
+      return await this.createPayment(params, params.customer);
+    } catch (error) {
+      if (!(error instanceof PhoneRejectedError)) throw error;
+
+      // Notch Pay valide le numéro avec ses propres règles : un numéro bien formé mais inexistant est
+      // refusé. Ce numéro n'est qu'une information de contact (le voyageur saisit lui-même celui avec
+      // lequel il paie, sur la page de Notch Pay) : l'adresse e-mail suffit.
+      if (params.customer.email) {
+        this.logger.warn("Numéro refusé par Notch Pay : nouvel essai avec l'adresse e-mail seule.");
+        try {
+          return await this.createPayment(params, { ...params.customer, phone: undefined });
+        } catch (retryError) {
+          if (retryError instanceof PhoneRejectedError) throw this.phoneRejected();
+          throw retryError;
+        }
+      }
+      throw this.phoneRejected();
+    }
+  }
+
+  private phoneRejected() {
+    return new UnprocessableEntityException(
+      "Le service de paiement ne reconnaît pas votre numéro de téléphone. Ajoutez une adresse e-mail à votre compte (« Mes informations » dans votre profil), puis réessayez.",
+    );
+  }
+
+  private async createPayment(params: InitiatePaymentParams, who: InitiatePaymentParams['customer']): Promise<InitiatePaymentResult> {
+    const customer: Json = { name: who.name };
+    if (who.phone) customer.phone = who.phone;
+    if (who.email) customer.email = who.email;
 
     const json = await this.request('POST', '/payments', {
       amount: Math.round(params.amount), // le FCFA n'a pas de décimales
@@ -251,6 +289,13 @@ export class NotchPayGateway implements PaymentGateway {
 
     if (!response.ok) {
       this.logger.error(`Notch Pay a répondu ${response.status} (${method} ${path}) : ${text.slice(0, 500)}`);
+      if (response.status === 422) {
+        // Données refusées par Notch Pay. Le cas du numéro de téléphone est traité par l'appelant.
+        if (mentionsPhone(json)) throw new PhoneRejectedError();
+        throw new UnprocessableEntityException(
+          "Le service de paiement a refusé les informations de votre compte. Vérifiez votre profil (« Mes informations »), puis réessayez.",
+        );
+      }
       if (response.status === 401 || response.status === 403) {
         // Clé refusée : problème de configuration, pas de l'utilisateur.
         throw new ServiceUnavailableException('Le paiement est momentanément indisponible.');

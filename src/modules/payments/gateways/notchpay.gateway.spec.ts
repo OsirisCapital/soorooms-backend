@@ -171,6 +171,56 @@ describe('NotchPayGateway — appels à l’API', () => {
     expect((await makeGateway().initiatePayment(params)).gatewayRef).toBe('trx.STR');
   });
 
+  describe('numéro de téléphone refusé par Notch Pay (422)', () => {
+    const phoneRejection = () =>
+      reply(422, {
+        code: '422',
+        status: 'Unprocessable Content',
+        message: 'The phone field must be a valid number. (and 1 more error)',
+        errors: { customer: ['The phone field must be a valid number.'], 'customer.phone': ['The customer.phone field must be a valid number.'] },
+      });
+    const created = () =>
+      reply(201, { transaction: { reference: 'trx.OK1' }, authorization_url: 'https://pay.notchpay.co/trx.OK1' });
+    const withEmail = { ...params, customer: { name: 'Aline K.', phone: '+237611111111', email: 'aline@example.com' } };
+
+    it('réessaie UNE fois avec l’adresse e-mail seule quand le numéro est refusé', async () => {
+      fetchMock.mockResolvedValueOnce(phoneRejection()).mockResolvedValueOnce(created());
+      await expect(makeGateway().initiatePayment(withEmail)).resolves.toEqual({
+        paymentUrl: 'https://pay.notchpay.co/trx.OK1',
+        gatewayRef: 'trx.OK1',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).customer).toEqual({ name: 'Aline K.', phone: '+237611111111', email: 'aline@example.com' });
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).customer).toEqual({ name: 'Aline K.', email: 'aline@example.com' });
+    });
+
+    it('sans adresse e-mail : message clair qui explique quoi faire, sans deuxième appel', async () => {
+      fetchMock.mockResolvedValueOnce(phoneRejection());
+      const error = await makeGateway().initiatePayment(params).catch((e: Error) => e);
+      expect((error as Error).message).toMatch(/Ajoutez une adresse e-mail/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('ne boucle pas : si le numéro est encore refusé au 2e essai, message clair', async () => {
+      fetchMock.mockImplementation(async () => phoneRejection()); // une réponse neuve à chaque appel : un corps ne se lit qu'une fois
+      await expect(makeGateway().initiatePayment(withEmail)).rejects.toThrow(/Ajoutez une adresse e-mail/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('un numéro accepté ne provoque qu’un seul appel, numéro compris', async () => {
+      fetchMock.mockResolvedValueOnce(created());
+      await makeGateway().initiatePayment(withEmail);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).customer.phone).toBe('+237611111111');
+    });
+
+    it('une autre erreur 422 ne déclenche aucun nouvel essai et donne un message exploitable', async () => {
+      fetchMock.mockResolvedValueOnce(reply(422, { message: 'The amount must be at least 100', errors: { amount: ['too low'] } }));
+      await expect(makeGateway().initiatePayment(withEmail)).rejects.toThrow(/refusé les informations de votre compte/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('n’appelle pas Notch Pay sans clé publique', async () => {
     await expect(makeGateway({ publicKey: '' }).initiatePayment(params)).rejects.toThrow(/pas encore disponible/);
     expect(fetchMock).not.toHaveBeenCalled();
