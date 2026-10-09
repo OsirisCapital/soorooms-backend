@@ -15,9 +15,14 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from '../payments/payments.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
+
+/** Une notification à envoyer : son type et les données qui la composent (vérifiés ensemble). */
+type NotificationSpec = { [K in NotificationType]: [K, NotificationPayloads[K]] }[NotificationType];
 
 // Statuts de réservation qui bloquent réellement le calendrier — une
 // négociation en cours (NEGOTIATING) ne réserve rien tant qu'aucun prix
@@ -30,6 +35,7 @@ export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentsService: PaymentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(travelerId: string, dto: CreateBookingDto) {
@@ -72,6 +78,14 @@ export class BookingsService {
       });
       return created;
     });
+
+    // Prévient les gestionnaires du logement (jamais bloquant : la réservation est déjà créée).
+    const traveler = await this.prisma.user.findUnique({ where: { id: travelerId }, select: { fullName: true } });
+    await this.notifications.notifyMany(
+      room.property.collaborators.map((c) => c.userId),
+      'BOOKING_REQUESTED',
+      { bookingId: booking.id, travelerName: traveler?.fullName ?? 'Un voyageur', propertyTitle: room.property.title, amount: Number(proposedPrice) },
+    );
 
     return this.findOne(booking.id, travelerId);
   }
@@ -121,6 +135,9 @@ export class BookingsService {
       });
     });
 
+    const actor = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
+    await this.notifyOthers(booking, userId, (audience) => ['OFFER_RECEIVED', { bookingId, audience, amount: Number(dto.amount), fromName: actor?.fullName ?? 'Votre interlocuteur' }]);
+
     return this.findOne(bookingId, userId);
   }
 
@@ -157,6 +174,11 @@ export class BookingsService {
       }
     });
 
+    await this.notifyOthers(booking, userId, (audience) => [
+      'OFFER_ACCEPTED',
+      { bookingId, audience, amount: Number(currentOffer.amount), propertyTitle: booking.room.property.title },
+    ]);
+
     return this.findOne(bookingId, userId);
   }
 
@@ -171,6 +193,8 @@ export class BookingsService {
       await tx.priceOffer.update({ where: { id: currentOffer.id }, data: { status: 'REJECTED' } });
       await tx.booking.update({ where: { id: bookingId }, data: { status: 'CANCELLED' } });
     });
+
+    await this.notifyOthers(booking, userId, (audience) => ['OFFER_REJECTED', { bookingId, audience, propertyTitle: booking.room.property.title }]);
 
     return this.findOne(bookingId, userId);
   }
@@ -193,7 +217,17 @@ export class BookingsService {
       data: { travelerConfirmedAt: booking.travelerConfirmedAt ?? new Date() },
     });
 
-    await this.maybeComplete(bookingId);
+    const completed = await this.maybeComplete(bookingId);
+    // Première confirmation seulement (un second clic ne doit pas renotifier), et pas si la
+    // réservation vient de se terminer (les notifications de fin partent alors dans maybeComplete).
+    if (!completed && !booking.travelerConfirmedAt && !booking.hostConfirmedAt) {
+      const traveler = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
+      await this.notifications.notifyMany(
+        booking.room.property.collaborators.map((c) => c.userId),
+        'STAY_CONFIRMATION_REQUESTED',
+        { bookingId, audience: 'host', otherName: traveler?.fullName ?? 'Le voyageur' },
+      );
+    }
     return this.findOne(bookingId, userId);
   }
 
@@ -210,7 +244,15 @@ export class BookingsService {
       data: { hostConfirmedAt: booking.hostConfirmedAt ?? new Date() },
     });
 
-    await this.maybeComplete(bookingId);
+    const completed = await this.maybeComplete(bookingId);
+    if (!completed && !booking.hostConfirmedAt && !booking.travelerConfirmedAt) {
+      const host = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
+      await this.notifications.notify(booking.travelerId, 'STAY_CONFIRMATION_REQUESTED', {
+        bookingId,
+        audience: 'traveler',
+        otherName: host?.fullName ?? "L'hôte",
+      });
+    }
     return this.findOne(bookingId, userId);
   }
 
@@ -227,12 +269,14 @@ export class BookingsService {
       where: { id: bookingId },
       data: { status: 'DISPUTED', disputeReason: dto.reason },
     });
+    await this.notifyOthers(booking, userId, (audience) => ['DISPUTE_OPENED', { bookingId, audience }]);
+    await this.notifications.notifyStaff('disputes.view', 'DISPUTE_OPENED_STAFF', { bookingId });
     return this.findOne(bookingId, userId);
   }
 
   /** Passe la réservation à COMPLETED et déclenche le reversement dès que
    *  les deux confirmations sont réunies — sans effet sinon. */
-  private async maybeComplete(bookingId: string) {
+  private async maybeComplete(bookingId: string): Promise<boolean> {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (booking?.travelerConfirmedAt && booking?.hostConfirmedAt) {
       // Le reversement passe AVANT le changement de statut : s'il échoue
@@ -241,11 +285,48 @@ export class BookingsService {
       // confirm-checkin / confirm-hosting relance simplement le reversement.
       // L'ancien ordre laissait une réservation COMPLETED dont les fonds
       // restaient bloqués, sans aucun moyen de réessayer.
-      await this.paymentsService.releaseEscrow(bookingId);
-      await this.prisma.booking.updateMany({
+      const escrow = await this.paymentsService.releaseEscrow(bookingId);
+      const done = await this.prisma.booking.updateMany({
         where: { id: bookingId, status: 'CONFIRMED_ESCROW' },
         data: { status: 'COMPLETED' },
       });
+      // Notifié une seule fois : seulement si CET appel a fait passer la réservation à COMPLETED.
+      if (done.count > 0) {
+        await this.notifyCompletion(bookingId, Number(escrow.hostPayout));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async notifyCompletion(bookingId: string, hostPayout: number) {
+    const booking = await this.loadBookingContext(bookingId).catch(() => null);
+    if (!booking) return;
+    const propertyTitle = booking.room.property.title;
+    await this.notifications.notify(booking.travelerId, 'BOOKING_COMPLETED', { bookingId, propertyTitle });
+    await this.notifications.notifyMany(
+      booking.room.property.collaborators.map((c) => c.userId),
+      'PAYOUT_RELEASED',
+      { bookingId, amount: hostPayout, propertyTitle },
+    );
+  }
+
+  /**
+   * Prévient « l'autre côté » de la réservation : le voyageur (s'il n'est pas l'auteur) et les
+   * gestionnaires du logement (sauf l'auteur). Le texte dépend du destinataire (voyageur ou hôte).
+   */
+  private async notifyOthers(
+    booking: Awaited<ReturnType<BookingsService['loadBookingContext']>>,
+    actorId: string,
+    build: (audience: 'traveler' | 'host') => NotificationSpec,
+  ) {
+    const send = async (userId: string, audience: 'traveler' | 'host') => {
+      const [type, payload] = build(audience);
+      await this.notifications.notify(userId, type, payload as never);
+    };
+    if (booking.travelerId !== actorId) await send(booking.travelerId, 'traveler');
+    for (const collaborator of booking.room.property.collaborators) {
+      if (collaborator.userId !== actorId) await send(collaborator.userId, 'host');
     }
   }
 

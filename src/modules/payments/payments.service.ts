@@ -13,12 +13,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../../config/configuration.js';
 import type { PaymentMethod } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import {
   PAYMENT_GATEWAY,
   type PaymentCustomer,
@@ -33,6 +35,8 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService<AppConfig, true>,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
+    // Optionnel : les notifications ne sont qu'un effet secondaire, jamais une condition du paiement.
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async initiate(bookingId: string, userId: string) {
@@ -258,7 +262,7 @@ export class PaymentsService {
    */
   private async applyPayment(params: {
     escrow: { id: string; bookingId: string };
-    existing: { id: string } | null;
+    existing: { id: string; transactionStatus?: string } | null;
     gatewayRef: string;
     status: 'SUCCESS' | 'FAILED' | 'PENDING';
     amount: number;
@@ -267,7 +271,7 @@ export class PaymentsService {
   }) {
     const { escrow, existing, gatewayRef, status, amount, paymentMethod, payload } = params;
 
-    await this.prisma.$transaction(async (tx) => {
+    const confirmedNow = await this.prisma.$transaction(async (tx) => {
       if (existing) {
         await tx.transaction.update({
           where: { id: existing.id },
@@ -300,8 +304,57 @@ export class PaymentsService {
             `Paiement SUCCESS reçu pour la réservation ${escrow.bookingId} qui n'est plus PENDING_PAYMENT : remboursement manuel à prévoir.`,
           );
         }
+        return moved.count > 0;
       }
+      return false;
     });
+
+    // Notifications APRÈS l'écriture, et seulement si CET appel a fait avancer la réservation
+    // (webhook rejoué ou retour du voyageur en double : une seule alerte). Un échec d'alerte n'est jamais remonté.
+    if (confirmedNow === true) {
+      await this.notifyPaymentConfirmed(escrow.bookingId, amount);
+    } else if (status === 'FAILED' && existing?.transactionStatus !== 'FAILED') {
+      await this.notifyPaymentFailed(escrow.bookingId);
+    }
+  }
+
+  private async loadForNotification(bookingId: string) {
+    return this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        travelerId: true,
+        room: { select: { property: { select: { title: true, collaborators: { select: { userId: true } } } } } },
+      },
+    });
+  }
+
+  private async notifyPaymentConfirmed(bookingId: string, amount: number) {
+    if (!this.notifications) return;
+    try {
+      const booking = await this.loadForNotification(bookingId);
+      if (!booking) return;
+      const propertyTitle = booking.room.property.title;
+      await this.notifications.notify(booking.travelerId, 'PAYMENT_CONFIRMED', { bookingId, audience: 'traveler', amount, propertyTitle });
+      await this.notifications.notifyMany(
+        booking.room.property.collaborators.map((c) => c.userId),
+        'PAYMENT_CONFIRMED',
+        { bookingId, audience: 'host', amount, propertyTitle },
+      );
+    } catch (error) {
+      this.logger.error(`Alertes de paiement non envoyées (réservation ${bookingId}) : ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async notifyPaymentFailed(bookingId: string) {
+    if (!this.notifications) return;
+    try {
+      const booking = await this.loadForNotification(bookingId);
+      if (!booking) return;
+      await this.notifications.notify(booking.travelerId, 'PAYMENT_FAILED', { bookingId, propertyTitle: booking.room.property.title });
+    } catch (error) {
+      this.logger.error(`Alerte d'échec de paiement non envoyée (réservation ${bookingId}) : ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**

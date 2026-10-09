@@ -10,8 +10,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { AddPhotoDto } from './dto/add-photo.dto.js';
 import type { CreatePropertyDto } from './dto/create-property.dto.js';
 import type { InviteCollaboratorDto } from './dto/invite-collaborator.dto.js';
@@ -20,7 +22,11 @@ import type { UpdatePropertyDto } from './dto/update-property.dto.js';
 
 @Injectable()
 export class PropertiesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Optionnel : une notification n'est jamais une condition de la publication.
+    @Optional() private readonly notifications?: NotificationsService,
+  ) {}
 
   // ---------------------------------------------------------------------
   // Création — le créateur devient automatiquement collaborateur MANAGER.
@@ -201,10 +207,15 @@ export class PropertiesService {
       throw new BadRequestException('Ajoutez au moins une chambre avant de publier ce logement.');
     }
 
-    return this.prisma.property.update({
+    const published = await this.prisma.property.update({
       where: { id: propertyId },
       data: { status: 'ACTIVE' },
       include: { amenities: true, rooms: true, photos: { orderBy: { position: 'asc' } } },
     });
+    // Une seule alerte : pas de nouvelle notification si le logement était déjà publié.
+    if (property.status !== 'ACTIVE') {
+      await this.notifications?.notify(requesterId, 'PROPERTY_PUBLISHED', { propertyId, propertyTitle: property.title });
+    }
+    return published;
   }
 }

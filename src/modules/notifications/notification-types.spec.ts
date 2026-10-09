@@ -53,6 +53,12 @@ describe('renderNotification', () => {
     expect(host.linkUrl).toBe('/hote/reservations/b1');
   });
 
+  it("la demande de réservation annonce le prix proposé quand il est connu", () => {
+    const base = { bookingId: 'b', travelerName: 'Marie', propertyTitle: 'Villa' };
+    expect(renderNotification('BOOKING_REQUESTED', { ...base, amount: 28000 }).body).toContain('28 000 FCFA');
+    expect(renderNotification('BOOKING_REQUESTED', base).body).not.toContain('FCFA');
+  });
+
   it('une annonce ne peut mener que vers une page de l\'application', () => {
     expect(renderNotification('ANNOUNCEMENT', { title: 'T', body: 'B', href: 'https://evil.test' }).linkUrl).toBeNull();
     expect(renderNotification('ANNOUNCEMENT', { title: 'T', body: 'B', href: '/home' }).linkUrl).toBe('/home');

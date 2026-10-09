@@ -13,7 +13,7 @@ export type NotificationPayloads = {
   KYC_APPROVED: Record<string, never>;
   KYC_REJECTED: { reason: string };
   // Réservation et négociation
-  BOOKING_REQUESTED: { bookingId: string; travelerName: string; propertyTitle: string }; // → hôte
+  BOOKING_REQUESTED: { bookingId: string; travelerName: string; propertyTitle: string; amount?: number }; // → hôte
   OFFER_RECEIVED: { bookingId: string; audience: Audience; amount: number; fromName: string };
   OFFER_ACCEPTED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
   OFFER_REJECTED: { bookingId: string; audience: Audience; propertyTitle: string };
@@ -79,7 +79,7 @@ const RENDERERS: Renderers = {
   }),
   BOOKING_REQUESTED: (p) => ({
     title: 'Nouvelle demande de réservation',
-    body: `${clip(p.travelerName)} souhaite réserver « ${clip(p.propertyTitle)} ».`,
+    body: `${clip(p.travelerName)} souhaite réserver « ${clip(p.propertyTitle)} ».${p.amount ? ` Prix proposé : ${fcfa(p.amount)}.` : ''}`,
     linkUrl: bookingLink('host', p.bookingId),
   }),
   OFFER_RECEIVED: (p) => ({
