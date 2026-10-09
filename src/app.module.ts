@@ -31,6 +31,7 @@ import { MessagesModule } from './modules/messages/messages.module.js';
    import { AnnouncementsModule } from './modules/announcements/announcements.module.js';
    import { ReleasesModule } from './modules/releases/releases.module.js';
    import { StaffModule } from './modules/staff/staff.module.js';
+   import { ProfileModule } from './modules/profile/profile.module.js';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { MessagesModule } from './modules/messages/messages.module.js';
     AnnouncementsModule,
     ReleasesModule,
     StaffModule,
+    ProfileModule
   ],
   controllers: [AppController],
   providers: [

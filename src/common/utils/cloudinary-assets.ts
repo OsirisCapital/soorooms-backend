@@ -11,12 +11,13 @@
  */
 import { createHash } from 'node:crypto';
 
-export type AssetPurpose = 'property_photo' | 'kyc_document';
+export type AssetPurpose = 'property_photo' | 'kyc_document' | 'avatar';
 export type DeliveryType = 'upload' | 'authenticated';
 
 export const ASSET_RULES: Record<AssetPurpose, { folder: string; allowedFormats: string; deliveryType: DeliveryType }> = {
   property_photo: { folder: 'soorooms/properties', allowedFormats: 'jpg,jpeg,png,webp', deliveryType: 'upload' },
   kyc_document: { folder: 'soorooms/kyc', allowedFormats: 'jpg,jpeg,png,webp,pdf', deliveryType: 'authenticated' },
+  avatar: { folder: 'soorooms/avatars', allowedFormats: 'jpg,jpeg,png,webp', deliveryType: 'upload' },
 };
 
 /** Durée de validité d'un lien de consultation d'un document privé. */
