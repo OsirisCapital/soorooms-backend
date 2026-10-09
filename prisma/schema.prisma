@@ -126,6 +126,7 @@ model User {
   // interrupteur. Sans objet pour un TRAVELER (reste NOT_SUBMITTED).
   kycStatus     KycStatus @default(NOT_SUBMITTED)
   avatarUrl     String?
+  emailNotifications Boolean @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

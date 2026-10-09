@@ -1,6 +1,7 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/current-user.decorator.js';
+import { SetPreferencesDto } from './dto/preferences.dto.js';
 import { NotificationsService } from './notifications.service.js';
 
 // Chaque personne ne voit et ne modifie que SES notifications : l'identifiant vient du jeton, jamais de l'adresse.
@@ -27,6 +28,16 @@ export class NotificationsController {
   @Get('unread-count')
   unreadCount(@CurrentUser() user: AuthenticatedUser) {
     return this.notifications.unreadCount(user.id);
+  }
+
+  @Get('preferences')
+  preferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.notifications.getPreferences(user.id);
+  }
+
+  @Patch('preferences')
+  setPreferences(@CurrentUser() user: AuthenticatedUser, @Body() dto: SetPreferencesDto) {
+    return this.notifications.setEmailEnabled(user.id, dto.emailEnabled);
   }
 
   @HttpCode(HttpStatus.OK)

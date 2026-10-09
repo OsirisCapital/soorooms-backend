@@ -6,6 +6,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { permissionsFor, type Permission } from '../admin/permissions.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { NotificationEmailService } from './notification-email.service.js';
 import { renderNotification, type NotificationPayloads, type NotificationType } from './notification-types.js';
 
 const MAX_PAGE = 50;
@@ -14,13 +15,18 @@ const MAX_PAGE = 50;
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emails: NotificationEmailService,
+  ) {}
 
   /** Notifie une personne. Ne lève jamais d'erreur. Renvoie true si la notification est écrite. */
   async notify<T extends NotificationType>(userId: string, type: T, payload: NotificationPayloads[T]): Promise<boolean> {
     try {
       const { title, body, linkUrl } = renderNotification(type, payload);
       await this.prisma.notification.create({ data: { userId, type, title, body, linkUrl } });
+      // Pas d'await : l'e-mail ne retarde ni ne conditionne l'action qui a déclenché la notification.
+      void this.emails.sendFor([userId], type, { title, body, linkUrl });
       return true;
     } catch (error) {
       this.logger.error(`Notification ${type} non écrite pour ${userId} : ${error instanceof Error ? error.message : String(error)}`);
@@ -35,6 +41,7 @@ export class NotificationsService {
     try {
       const { title, body, linkUrl } = renderNotification(type, payload);
       await this.prisma.notification.createMany({ data: unique.map((userId) => ({ userId, type, title, body, linkUrl })) });
+      void this.emails.sendFor(unique, type, { title, body, linkUrl });
     } catch (error) {
       this.logger.error(`Notification ${type} non écrite pour ${unique.length} personne(s) : ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -78,6 +85,20 @@ export class NotificationsService {
     });
     const hasMore = rows.length > take;
     return { items: hasMore ? rows.slice(0, take) : rows, hasMore };
+  }
+
+  async getPreferences(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { emailNotifications: true, email: true, emailVerifiedAt: true } });
+    return {
+      emailEnabled: user?.emailNotifications ?? true,
+      // Sans adresse vérifiée, aucun e-mail ne part : on le dit à la personne plutôt que de la laisser croire le contraire.
+      emailVerified: Boolean(user?.email && user.emailVerifiedAt),
+    };
+  }
+
+  async setEmailEnabled(userId: string, emailEnabled: boolean) {
+    await this.prisma.user.update({ where: { id: userId }, data: { emailNotifications: emailEnabled } });
+    return this.getPreferences(userId);
   }
 
   async unreadCount(userId: string) {

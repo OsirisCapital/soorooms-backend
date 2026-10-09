@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../../prisma/prisma.service.js';
+import type { NotificationEmailService } from './notification-email.service.js';
 import { NotificationsService } from './notifications.service.js';
 
 function make(overrides: Record<string, unknown> = {}) {
@@ -12,8 +13,9 @@ function make(overrides: Record<string, unknown> = {}) {
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const user = { findMany: vi.fn().mockResolvedValue([]) };
+  const emails = { sendFor: vi.fn().mockResolvedValue(undefined) };
   const prisma = { notification, user, ...overrides };
-  return { service: new NotificationsService(prisma as unknown as PrismaService), notification, user };
+  return { service: new NotificationsService(prisma as unknown as PrismaService, emails as unknown as NotificationEmailService), notification, user, emails };
 }
 
 beforeEach(() => {
@@ -33,6 +35,51 @@ describe('NotificationsService.notify', () => {
     const { service, notification } = make();
     notification.create.mockRejectedValue(new Error('base indisponible'));
     await expect(service.notify('u1', 'KYC_APPROVED', {})).resolves.toBe(false);
+  });
+});
+
+describe('NotificationsService — e-mails', () => {
+  it("demande l'e-mail avec le même texte que la cloche", async () => {
+    const { service, emails } = make();
+    await service.notify('u1', 'KYC_APPROVED', {});
+    expect(emails.sendFor).toHaveBeenCalledWith(['u1'], 'KYC_APPROVED', { title: expect.any(String), body: expect.any(String), linkUrl: '/hote' });
+  });
+
+  it("un e-mail qui échoue ne fait pas échouer la notification, ni l'action qui l'a déclenchée", async () => {
+    const { service, emails } = make();
+    emails.sendFor.mockRejectedValue(new Error('Brevo en panne'));
+    await expect(service.notify('u1', 'KYC_APPROVED', {})).resolves.toBe(true);
+  });
+
+  it("n'envoie aucun e-mail si la notification n'a pas pu être écrite", async () => {
+    const { service, notification, emails } = make();
+    notification.create.mockRejectedValue(new Error('x'));
+    await service.notify('u1', 'KYC_APPROVED', {});
+    expect(emails.sendFor).not.toHaveBeenCalled();
+  });
+
+  it('notifyMany envoie une seule fois par personne', async () => {
+    const { service, emails } = make();
+    await service.notifyMany(['a', 'b', 'a'], 'MESSAGE_RECEIVED', { fromName: 'Z' });
+    expect(emails.sendFor).toHaveBeenCalledWith(['a', 'b'], 'MESSAGE_RECEIVED', expect.any(Object));
+  });
+});
+
+describe('NotificationsService — préférences', () => {
+  it("lit l'interrupteur et dit si l'adresse est vérifiée", async () => {
+    const { service, user } = make();
+    Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: false, email: 'a@b.c', emailVerifiedAt: new Date() }) });
+    expect(await service.getPreferences('u1')).toEqual({ emailEnabled: false, emailVerified: true });
+    Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: true, email: 'a@b.c', emailVerifiedAt: null }) });
+    expect(await service.getPreferences('u1')).toEqual({ emailEnabled: true, emailVerified: false });
+  });
+
+  it("ne modifie que le compte de la personne connectée", async () => {
+    const { service, user } = make();
+    const update = vi.fn().mockResolvedValue({});
+    Object.assign(user, { update, findUnique: vi.fn().mockResolvedValue({ emailNotifications: false, email: null, emailVerifiedAt: null }) });
+    await service.setEmailEnabled('u1', false);
+    expect(update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { emailNotifications: false } });
   });
 });
 
