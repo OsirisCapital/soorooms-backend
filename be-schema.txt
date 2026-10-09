@@ -1,0 +1,46 @@
+AJOUTS A FAIRE A LA MAIN DANS prisma/schema.prisma
+
+1) Dans le modele HostProfile, juste apres la ligne "updatedAt   DateTime @updatedAt" :
+
+  // Ou verser l'argent de l'hote (Mobile Money). Les trois champs vont ensemble.
+  payoutChannel     String? // 'cm.mtn' | 'cm.orange'
+  payoutPhone       String? // +2376XXXXXXXX
+  payoutAccountName String? // nom du titulaire du compte Mobile Money
+  payoutUpdatedAt   DateTime? // pour reperer un changement de numero recent avant de verser
+
+2) Dans le modele EscrowVault, apres la ligne "transactions  Transaction[]" ajouter :
+
+  payout        Payout?
+
+3) A la suite de EscrowVault (n'importe ou dans le fichier, hors d'un modele), coller :
+
+enum PayoutStatus {
+  TO_SEND
+  SENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+model Payout {
+  id               String       @id @default(uuid())
+  escrowId         String       @unique
+  escrow           EscrowVault  @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  hostUserId       String?
+  amount           Decimal      @db.Decimal(10, 2)
+  status           PayoutStatus @default(TO_SEND)
+  attempts         Int          @default(0)
+  reference        String?      @unique
+  gatewayRef       String?
+  beneficiaryChannel String?
+  beneficiaryPhone   String?
+  beneficiaryName    String?
+  failureReason    String?
+  sentById         String?
+  sentAt           DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([status, createdAt])
+}

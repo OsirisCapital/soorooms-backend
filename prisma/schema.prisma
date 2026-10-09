@@ -237,6 +237,11 @@ model HostProfile {
   bio         String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+   // Ou verser l'argent de l'hote (Mobile Money). Les trois champs vont ensemble.
+  payoutChannel     String? // 'cm.mtn' | 'cm.orange'
+  payoutPhone       String? // +2376XXXXXXXX
+  payoutAccountName String? // nom du titulaire du compte Mobile Money
+  payoutUpdatedAt   DateTime? // pour reperer un changement de numero recent avant de verser
 
   // Le justificatif d'identité vit désormais dans KycDocument (avec
   // l'historique des soumissions), plus ici en champ unique — sinon on a
@@ -417,7 +422,39 @@ model EscrowVault {
   updatedAt     DateTime     @updatedAt
 
   transactions  Transaction[]
+  payout        Payout?
 }
+enum PayoutStatus {
+  TO_SEND
+  SENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+model Payout {
+  id               String       @id @default(uuid())
+  escrowId         String       @unique
+  escrow           EscrowVault  @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  hostUserId       String?
+  amount           Decimal      @db.Decimal(10, 2)
+  status           PayoutStatus @default(TO_SEND)
+  attempts         Int          @default(0)
+  reference        String?      @unique
+  gatewayRef       String?
+  beneficiaryChannel String?
+  beneficiaryPhone   String?
+  beneficiaryName    String?
+  failureReason    String?
+  sentById         String?
+  sentAt           DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([status, createdAt])
+}
+
 
 model Transaction {
   id              String            @id @default(uuid())

@@ -3,11 +3,14 @@ import { NotchPayGateway } from './gateways/notchpay.gateway.js';
 import { PAYMENT_GATEWAY } from './interfaces/payment-gateway.interface.js';
 import { PaymentsController } from './payments.controller.js';
 import { PaymentsService } from './payments.service.js';
+import { AdminPayoutsController, PayoutDetailsController } from './payouts.controller.js';
+import { PayoutsService } from './payouts.service.js';
 
 @Module({
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, AdminPayoutsController, PayoutDetailsController],
   providers: [
     PaymentsService,
+    PayoutsService,
     // Bascule ici vers une autre implémentation (CinetPay, par exemple)
     // le jour venu — PaymentsService ne dépend que du jeton PAYMENT_GATEWAY,
     // jamais d'une classe concrète.

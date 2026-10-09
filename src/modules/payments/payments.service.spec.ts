@@ -41,10 +41,12 @@ function setup(overrides: Overrides = {}) {
   const gateway = {
     verifyWebhookSignature: vi.fn().mockReturnValue(overrides.signatureValid ?? true),
     parseWebhookPayload: vi.fn().mockReturnValue(
+      
       overrides.event === undefined
         ? { gatewayRef: 'trx.1', status: 'SUCCESS', amount: 20000, paymentMethod: 'MTN_MOMO', bookingReference: BOOKING_ID }
         : overrides.event,
     ),
+    parseTransferWebhook: vi.fn().mockReturnValue(null),
     verifyPayment: vi
       .fn()
       .mockResolvedValue(overrides.verified ?? { status: 'SUCCESS', amount: 20000, currency: 'XAF' }),

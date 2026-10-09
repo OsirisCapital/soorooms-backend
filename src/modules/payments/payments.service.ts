@@ -21,6 +21,7 @@ import type { AppConfig } from '../../config/configuration.js';
 import type { PaymentMethod } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { PayoutsService } from './payouts.service.js';
 import {
   PAYMENT_GATEWAY,
   type PaymentCustomer,
@@ -37,6 +38,7 @@ export class PaymentsService {
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
     // Optionnel : les notifications ne sont qu'un effet secondaire, jamais une condition du paiement.
     @Optional() private readonly notifications?: NotificationsService,
+    @Optional() private readonly payouts?: PayoutsService,
   ) {}
 
   async initiate(bookingId: string, userId: string) {
@@ -88,6 +90,13 @@ export class PaymentsService {
     const isValid = this.gateway.verifyWebhookSignature(rawBody, signatureHeader);
     if (!isValid) {
       throw new UnauthorizedException('Signature de webhook invalide.');
+    }
+
+    // Webhook de VERSEMENT à un hôte (transfer.*) : traité par PayoutsService, après relecture chez l'agrégateur.
+    const transfer = this.gateway.parseTransferWebhook(rawBody);
+    if (transfer) {
+      if (!this.payouts) return { ignored: true };
+      return this.payouts.applyTransferEvent(transfer.reference);
     }
 
     const event = this.gateway.parseWebhookPayload(rawBody);
@@ -358,40 +367,18 @@ export class PaymentsService {
   }
 
   /**
-   * Déclenche le reversement à l'hôte. Appelée par BookingsService une
-   * fois les deux confirmations (voyageur + hôte) obtenues — jamais
-   * directement par une route HTTP, pour qu'il soit impossible de
+   * Prépare le reversement à l'hôte. Appelée par BookingsService une fois les deux confirmations
+   * (voyageur + hôte) obtenues — jamais directement par une route HTTP, pour qu'il soit impossible de
    * déclencher un reversement sans être passé par la double validation.
-   * Idempotente : si déjà RELEASED_TO_HOST, ne fait rien.
+   *
+   * L'argent ne part PAS ici : le versement entre dans la file « À verser » de la finance
+   * (PayoutsService), qui l'envoie après vérification. Idempotente : un séquestre n'a qu'un versement.
    */
   async releaseEscrow(bookingId: string) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        // Verrou sur la ligne du séquestre : deux appels simultanés (les deux
-        // parties confirment au même instant) s'exécutent l'un après l'autre,
-        // le second voit RELEASED_TO_HOST et ne reverse pas une seconde fois.
-        await tx.$queryRaw`SELECT id FROM "EscrowVault" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
-
-        const escrow = await tx.escrowVault.findUnique({ where: { bookingId } });
-        if (!escrow) {
-          throw new NotFoundException('Aucun séquestre pour cette réservation.');
-        }
-        if (escrow.status !== 'HELD_IN_ESCROW') {
-          return escrow;
-        }
-
-        await this.gateway.releaseFunds({
-          amount: Number(escrow.hostPayout),
-          reference: bookingId,
-        });
-
-        return tx.escrowVault.update({
-          where: { id: escrow.id },
-          data: { status: 'RELEASED_TO_HOST' },
-        });
-      },
-      { timeout: 30_000 },
-    );
+    if (!this.payouts) {
+      throw new NotFoundException('Les versements ne sont pas disponibles.');
+    }
+    return this.payouts.queueForBooking(bookingId);
   }
 
   private buildCustomer(traveler: { fullName: string; phone: string; email: string | null }): PaymentCustomer {

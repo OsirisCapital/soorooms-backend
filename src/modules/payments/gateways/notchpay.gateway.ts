@@ -10,9 +10,9 @@
  *    signé, n'est JAMAIS suffisant seul pour confirmer une réservation : on
  *    recoupe toujours avec cette lecture directe (voir PaymentsService).
  *
- * Le reversement aux hôtes (Transfers API) n'est pas encore branché : il faut
- * d'abord savoir sur quel numéro et quel opérateur payer chaque hôte, donnée
- * que le modèle ne contient pas encore.
+ *  - Versement aux hôtes : POST /transfers (Transfers API). Cet appel exige, en plus de la clé
+ *    publique, la clé PRIVÉE dans l'en-tête `X-Grant` (variable NOTCHPAY_PRIVATE_KEY), et
+ *    l'adresse IP du serveur doit être autorisée dans le tableau de bord Notch Pay.
  */
 import {
   BadGatewayException,
@@ -32,8 +32,8 @@ import type {
   InitiatePaymentResult,
   NormalizedWebhookEvent,
   PaymentGateway,
-  ReleaseFundsParams,
-  ReleaseFundsResult,
+  SendTransferParams,
+  TransferState,
   VerifiedPayment,
 } from '../interfaces/payment-gateway.interface.js';
 
@@ -235,15 +235,77 @@ export class NotchPayGateway implements PaymentGateway {
   }
 
   // ---------------------------------------------------------------------
-  // Reversement aux hôtes — pas encore branché
+  // Versement aux hôtes (Transfers API)
   // ---------------------------------------------------------------------
 
-  async releaseFunds(params: ReleaseFundsParams): Promise<ReleaseFundsResult> {
-    this.logger.error(
-      `Reversement demandé pour la réservation ${params.reference} (${params.amount} FCFA) mais non implémenté : ` +
-        "il manque le numéro et l'opérateur de paiement de l'hôte, et l'appel à l'API Transfers de Notch Pay.",
+  async sendTransfer(params: SendTransferParams): Promise<TransferState> {
+    const json = await this.request(
+      'POST',
+      '/transfers',
+      {
+        amount: Math.round(params.amount), // le FCFA n'a pas de décimales
+        currency: params.currency,
+        channel: params.beneficiary.channel,
+        description: params.description,
+        reference: params.reference,
+        beneficiary_data: { name: params.beneficiary.name, phone: params.beneficiary.phone, country: 'CM' },
+      },
+      { grant: true },
     );
-    throw new ServiceUnavailableException("Le reversement automatique à l'hôte n'est pas encore disponible.");
+    const state = this.transferFrom(json.transfer ?? json);
+    if (!state) {
+      this.logger.error(`Réponse Notch Pay inattendue à un transfert : ${JSON.stringify(json).slice(0, 500)}`);
+      throw new BadGatewayException('Le service de paiement a renvoyé une réponse inattendue.');
+    }
+    return state;
+  }
+
+  async getTransfer(reference: string): Promise<TransferState | null> {
+    try {
+      const json = await this.request('GET', `/transfers/${encodeURIComponent(reference)}`, undefined, { grant: true });
+      const state = this.transferFrom(json.transfer ?? json);
+      if (!state) {
+        this.logger.error(`Lecture du transfert ${reference} : réponse inattendue ${JSON.stringify(json).slice(0, 500)}`);
+        throw new BadGatewayException('Le service de paiement a renvoyé une réponse inattendue.');
+      }
+      return state;
+    } catch (error) {
+      if (error instanceof NotFoundException) return null;
+      throw error;
+    }
+  }
+
+  parseTransferWebhook(rawBody: Buffer): { reference: string } | null {
+    let event: unknown;
+    try {
+      event = JSON.parse(rawBody.toString('utf-8'));
+    } catch {
+      return null;
+    }
+    const type = pickString(event, 'type', 'event') ?? '';
+    if (!type.startsWith('transfer.')) return null;
+    const root = isObject(event) && isObject(event.data) ? event.data : {};
+    const data = isObject(root.transfer) ? root.transfer : root;
+    const reference = pickString(data, 'reference', 'merchant_reference');
+    return reference ? { reference } : null;
+  }
+
+  private transferFrom(data: unknown): TransferState | null {
+    if (!isObject(data)) return null;
+    const gatewayRef = pickString(data, 'id', 'reference');
+    const reference = pickString(data, 'reference', 'merchant_reference');
+    if (!gatewayRef || !reference) return null;
+    const s = (pickString(data, 'status') ?? '').toLowerCase();
+    // Seul « complete » vaut versement réussi ; « reversed » = argent revenu, donc échec.
+    const status = s === 'complete' || s === 'completed' ? 'COMPLETE' : ['failed', 'reversed', 'canceled', 'cancelled', 'rejected'].includes(s) ? 'FAILED' : 'PENDING';
+    const amount = Number(data.amount);
+    return {
+      status,
+      gatewayRef,
+      reference,
+      failureReason: status === 'FAILED' ? (pickString(data, 'failure_reason', 'message', 'reason') ?? `Statut « ${s} »`) : undefined,
+      amount: Number.isFinite(amount) ? amount : undefined,
+    };
   }
 
   // ---------------------------------------------------------------------
@@ -254,8 +316,13 @@ export class NotchPayGateway implements PaymentGateway {
     return this.configService.get('payment.notchpay', { infer: true });
   }
 
-  private async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Json> {
+  private async request(method: 'GET' | 'POST', path: string, body?: unknown, options: { grant?: boolean } = {}): Promise<Json> {
     const { publicKey, apiUrl } = this.keys();
+    const privateKey = process.env.NOTCHPAY_PRIVATE_KEY ?? '';
+    if (options.grant && !privateKey) {
+      this.logger.error('NOTCHPAY_PRIVATE_KEY est absente : aucun transfert possible.');
+      throw new ServiceUnavailableException("Les versements ne sont pas encore configurés (clé privée Notch Pay absente).");
+    }
     if (!publicKey) {
       this.logger.error('NOTCHPAY_PUBLIC_KEY est absente : aucun appel à Notch Pay possible.');
       throw new ServiceUnavailableException("Le paiement n'est pas encore disponible.");
@@ -267,6 +334,7 @@ export class NotchPayGateway implements PaymentGateway {
         method,
         headers: {
           Authorization: publicKey,
+          ...(options.grant ? { 'X-Grant': privateKey } : {}),
           Accept: 'application/json',
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
@@ -289,11 +357,21 @@ export class NotchPayGateway implements PaymentGateway {
 
     if (!response.ok) {
       this.logger.error(`Notch Pay a répondu ${response.status} (${method} ${path}) : ${text.slice(0, 500)}`);
+      if (options.grant && response.status === 422) {
+        // Transfert refusé : on rend le motif de Notch Pay lisible par la finance.
+        const reason = pickString(json, 'message') ?? 'données refusées';
+        throw new UnprocessableEntityException(`Notch Pay a refusé le transfert : ${reason}`.slice(0, 300));
+      }
       if (response.status === 422) {
         // Données refusées par Notch Pay. Le cas du numéro de téléphone est traité par l'appelant.
         if (mentionsPhone(json)) throw new PhoneRejectedError();
         throw new UnprocessableEntityException(
           "Le service de paiement a refusé les informations de votre compte. Vérifiez votre profil (« Mes informations »), puis réessayez.",
+        );
+      }
+      if (options.grant && (response.status === 401 || response.status === 403)) {
+        throw new ServiceUnavailableException(
+          "Notch Pay refuse l'accès aux transferts : vérifiez les clés (publique et privée) et que l'adresse IP du serveur est autorisée dans le tableau de bord Notch Pay.",
         );
       }
       if (response.status === 401 || response.status === 403) {

@@ -22,7 +22,10 @@ export type NotificationPayloads = {
   PAYMENT_FAILED: { bookingId: string; propertyTitle: string }; // → voyageur
   STAY_CONFIRMATION_REQUESTED: { bookingId: string; audience: Audience; otherName: string };
   BOOKING_COMPLETED: { bookingId: string; propertyTitle: string }; // → voyageur
+  PAYOUT_QUEUED: { bookingId: string; amount: number; propertyTitle: string; needsDetails: boolean }; // → hôte
   PAYOUT_RELEASED: { bookingId: string; amount: number; propertyTitle: string }; // → hôte
+  PAYOUT_TO_SEND_STAFF: { amount: number; propertyTitle: string }; // → finance
+  PAYOUT_FAILED_STAFF: { amount: number; propertyTitle: string }; // → finance
   DISPUTE_OPENED: { bookingId: string; audience: Audience };
   DISPUTE_OPENED_STAFF: { bookingId: string }; // → équipe
   // Logements
@@ -140,10 +143,27 @@ const RENDERERS: Renderers = {
     body: `Merci d'avoir séjourné à « ${clip(p.propertyTitle)} ». Laissez un avis pour aider les autres voyageurs.`,
     linkUrl: bookingLink('traveler', p.bookingId),
   }),
+  PAYOUT_QUEUED: (p) => ({
+    title: 'Versement en préparation',
+    body: p.needsDetails
+      ? `${fcfa(p.amount)} vous seront versés pour « ${clip(p.propertyTitle)} ». Indiquez votre numéro Mobile Money pour les recevoir.`
+      : `${fcfa(p.amount)} vous seront versés pour « ${clip(p.propertyTitle)} » après vérification par notre équipe.`,
+    linkUrl: p.needsDetails ? '/profil/parametres/versement' : bookingLink('host', p.bookingId),
+  }),
   PAYOUT_RELEASED: (p) => ({
-    title: 'Versement déclenché 💸',
-    body: `${fcfa(p.amount)} vous sont versés pour « ${clip(p.propertyTitle)} ».`,
+    title: 'Versement envoyé 💸',
+    body: `${fcfa(p.amount)} ont été envoyés sur votre compte Mobile Money pour « ${clip(p.propertyTitle)} ».`,
     linkUrl: bookingLink('host', p.bookingId),
+  }),
+  PAYOUT_TO_SEND_STAFF: (p) => ({
+    title: 'Versement à envoyer',
+    body: `${fcfa(p.amount)} à verser à l'hôte de « ${clip(p.propertyTitle)} ».`,
+    linkUrl: '/admin/versements',
+  }),
+  PAYOUT_FAILED_STAFF: (p) => ({
+    title: 'Versement en échec',
+    body: `Le versement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » a échoué. Ouvrez la file pour réessayer.`,
+    linkUrl: '/admin/versements',
   }),
   DISPUTE_OPENED: (p) => ({
     title: 'Un litige a été ouvert',

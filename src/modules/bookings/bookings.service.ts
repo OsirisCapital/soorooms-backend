@@ -285,30 +285,25 @@ export class BookingsService {
       // confirm-checkin / confirm-hosting relance simplement le reversement.
       // L'ancien ordre laissait une réservation COMPLETED dont les fonds
       // restaient bloqués, sans aucun moyen de réessayer.
-      const escrow = await this.paymentsService.releaseEscrow(bookingId);
+      await this.paymentsService.releaseEscrow(bookingId);
       const done = await this.prisma.booking.updateMany({
         where: { id: bookingId, status: 'CONFIRMED_ESCROW' },
         data: { status: 'COMPLETED' },
       });
       // Notifié une seule fois : seulement si CET appel a fait passer la réservation à COMPLETED.
       if (done.count > 0) {
-        await this.notifyCompletion(bookingId, Number(escrow.hostPayout));
+        await this.notifyCompletion(bookingId);
         return true;
       }
     }
     return false;
   }
 
-  private async notifyCompletion(bookingId: string, hostPayout: number) {
+  private async notifyCompletion(bookingId: string) {
     const booking = await this.loadBookingContext(bookingId).catch(() => null);
     if (!booking) return;
-    const propertyTitle = booking.room.property.title;
-    await this.notifications.notify(booking.travelerId, 'BOOKING_COMPLETED', { bookingId, propertyTitle });
-    await this.notifications.notifyMany(
-      booking.room.property.collaborators.map((c) => c.userId),
-      'PAYOUT_RELEASED',
-      { bookingId, amount: hostPayout, propertyTitle },
-    );
+    await this.notifications.notify(booking.travelerId, 'BOOKING_COMPLETED', { bookingId, propertyTitle: booking.room.property.title });
+    // L'hôte est prévenu par PayoutsService (versement mis en file, puis versement envoyé).
   }
 
   /**

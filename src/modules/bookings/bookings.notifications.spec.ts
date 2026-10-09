@@ -100,13 +100,13 @@ describe('BookingsService — notifications', () => {
     expect(again.notifications.notifyMany).not.toHaveBeenCalled();
   });
 
-  it("quand les deux ont confirmé : séjour terminé pour le voyageur, versement pour les hôtes", async () => {
+  it("quand les deux ont confirmé : séjour terminé pour le voyageur, versement mis en file (l'hôte est prévenu par PayoutsService)", async () => {
     const both = context({ status: 'CONFIRMED_ESCROW', hostConfirmedAt: new Date(), travelerConfirmedAt: new Date() });
     const { service, notifications, payments } = make(both);
     await service.confirmCheckin('b1', TRAVELER);
     expect(payments.releaseEscrow).toHaveBeenCalledWith('b1');
     expect(notifications.notify).toHaveBeenCalledWith(TRAVELER, 'BOOKING_COMPLETED', { bookingId: 'b1', propertyTitle: 'Villa Kribi' });
-    expect(notifications.notifyMany).toHaveBeenCalledWith([HOST_A, HOST_B], 'PAYOUT_RELEASED', { bookingId: 'b1', amount: 27000, propertyTitle: 'Villa Kribi' });
+    expect(notifications.notifyMany).not.toHaveBeenCalledWith(expect.anything(), 'PAYOUT_RELEASED', expect.anything());
   });
 
   it("ne dit pas « versement » si la réservation était déjà terminée par un autre appel", async () => {

@@ -301,10 +301,4 @@ describe('NotchPayGateway — appels à l’API', () => {
     await expect(makeGateway().verifyPayment('trx.nope')).rejects.toThrow(/introuvable/);
   });
 
-  it('refuse de promettre un reversement tant qu’il n’est pas branché', async () => {
-    await expect(makeGateway().releaseFunds({ amount: 18000, reference: BOOKING_ID })).rejects.toThrow(
-      /pas encore disponible/,
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });

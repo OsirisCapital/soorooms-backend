@@ -12,6 +12,7 @@ export const PERMISSIONS = [
   'kyc.review', // demandes de vérification d'identité et documents
   'disputes.view', // litiges de réservation
   'payments.view', // paiements et séquestre
+  'payouts.manage', // versements aux hôtes : voir la file et envoyer
   'users.view', // fiches utilisateurs
   'support.manage', // demandes envoyées au support
   'announcements.manage', // annonces aux utilisateurs
@@ -26,7 +27,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
   SUPER_ADMIN: PERMISSIONS,
   KYC_REVIEWER: ['dashboard.view', 'kyc.review'],
   SUPPORT: ['dashboard.view', 'support.manage', 'users.view'],
-  FINANCE: ['dashboard.view', 'disputes.view', 'payments.view'],
+  FINANCE: ['dashboard.view', 'disputes.view', 'payments.view', 'payouts.manage'],
   CONTENT: ['dashboard.view', 'announcements.manage', 'releases.manage'],
 };
 

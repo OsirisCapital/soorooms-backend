@@ -38,14 +38,28 @@ export interface InitiatePaymentResult {
   gatewayRef: string;
 }
 
-export interface ReleaseFundsParams {
+/** Canal Mobile Money d'un versement (codes Notch Pay pour le Cameroun). */
+export type PayoutChannel = 'cm.mtn' | 'cm.orange';
+
+export interface SendTransferParams {
   amount: number;
-  /** Référence interne (ici : l'id de la Booking). */
+  currency: 'XAF';
+  /** Unique par tentative : l'agrégateur refuse deux fois la même référence, ce qui empêche un double envoi. */
   reference: string;
+  description: string;
+  beneficiary: { name: string; phone: string; channel: PayoutChannel };
 }
 
-export interface ReleaseFundsResult {
-  payoutRef: string;
+/** État d'un transfert tel que l'agrégateur le déclare. */
+export interface TransferState {
+  status: 'COMPLETE' | 'FAILED' | 'PENDING';
+  /** Identifiant du transfert chez l'agrégateur. */
+  gatewayRef: string;
+  /** Notre référence, telle que l'agrégateur la renvoie. */
+  reference: string;
+  /** Motif d'échec lisible, quand l'agrégateur en donne un. */
+  failureReason?: string;
+  amount?: number;
 }
 
 /** Forme normalisée d'un événement de webhook, indépendante de l'agrégateur. */
@@ -79,10 +93,15 @@ export const PAYMENT_GATEWAY = Symbol('PAYMENT_GATEWAY');
 
 export interface PaymentGateway {
   initiatePayment(params: InitiatePaymentParams): Promise<InitiatePaymentResult>;
-  /** Déclenche le reversement effectif à l'hôte (90% du montant) après la
-   *  double validation — voir BookingsService.maybeComplete et
-   *  PaymentsService.releaseEscrow. */
-  releaseFunds(params: ReleaseFundsParams): Promise<ReleaseFundsResult>;
+  /**
+   * Envoie de l'argent à l'hôte (Mobile Money). Appelée uniquement par PayoutsService, après la
+   * validation de la finance.
+   */
+  sendTransfer(params: SendTransferParams): Promise<TransferState>;
+  /** Relit un transfert par notre référence ; `null` si l'agrégateur ne le connaît pas (jamais envoyé). */
+  getTransfer(reference: string): Promise<TransferState | null>;
+  /** Normalise un webhook de transfert ; `null` si l'événement n'en est pas un. */
+  parseTransferWebhook(rawBody: Buffer): { reference: string } | null;
   /** Vérifie l'authenticité d'un webhook — doit être timing-safe. */
   verifyWebhookSignature(rawBody: Buffer, signatureHeader: string | undefined): boolean;
   /**
