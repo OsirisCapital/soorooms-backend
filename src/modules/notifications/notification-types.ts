@@ -33,8 +33,12 @@ export type NotificationPayloads = {
   SUPPORT_USER_REPLY: { ticketId: string; number: number; fromName: string }; // → équipe
   SUPPORT_REPLY: { ticketId: string; number: number }; // → utilisateur
   SUPPORT_TICKET_RESOLVED: { ticketId: string; number: number }; // → utilisateur
+  // Équipe
+  STAFF_ACCESS_CHANGED: { roleLabel: string | null }; // → membre concerné (null : retiré de l'équipe)
+  TASK_ASSIGNED: { taskId: string; title: string; fromName: string; dueDate?: string }; // → assigné
+  TASK_DONE: { taskId: string; title: string; byName: string }; // → créateur
   // Autres
-  MESSAGE_RECEIVED: { fromName: string };
+  MESSAGE_RECEIVED: { fromName: string; bookingId?: string };
   ANNOUNCEMENT: { title: string; body: string; href?: string };
 };
 
@@ -181,10 +185,27 @@ const RENDERERS: Renderers = {
     body: `Votre demande ${ticketRef(p.number)} est marquée comme résolue. Répondez-y si le problème persiste.`,
     linkUrl: `/profil/aide/tickets/${p.ticketId}`,
   }),
+  STAFF_ACCESS_CHANGED: (p) => ({
+    title: p.roleLabel ? 'Vos accès ont changé' : 'Vous ne faites plus partie de l’équipe',
+    body: p.roleLabel
+      ? `Votre niveau dans l'équipe SòôRooms est maintenant : ${clip(p.roleLabel, 60)}. Reconnectez-vous pour que tout soit à jour.`
+      : "Vos accès à l'administration ont été retirés. Votre compte reste utilisable comme voyageur ou hôte.",
+    linkUrl: p.roleLabel ? '/admin' : '/profil',
+  }),
+  TASK_ASSIGNED: (p) => ({
+    title: 'Nouvelle tâche pour vous',
+    body: `${clip(p.fromName, 60)} vous a confié : ${clip(p.title, 120)}${p.dueDate ? ` (pour le ${p.dueDate})` : ''}.`,
+    linkUrl: '/admin/taches',
+  }),
+  TASK_DONE: (p) => ({
+    title: 'Tâche terminée ✓',
+    body: `${clip(p.byName, 60)} a terminé : ${clip(p.title, 120)}.`,
+    linkUrl: '/admin/taches',
+  }),
   MESSAGE_RECEIVED: (p) => ({
     title: 'Nouveau message',
     body: `${clip(p.fromName)} vous a écrit.`,
-    linkUrl: '/messages',
+    linkUrl: p.bookingId ? `/messages/${encodeURIComponent(p.bookingId)}` : '/messages',
   }),
   ANNOUNCEMENT: (p) => ({
     title: clip(p.title, 100),

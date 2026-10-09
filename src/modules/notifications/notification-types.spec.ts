@@ -98,7 +98,10 @@ describe('renderNotification', () => {
       SUPPORT_USER_REPLY: { ticketId: 't', number: 42, fromName: 'A' },
       SUPPORT_REPLY: { ticketId: 't', number: 42 },
       SUPPORT_TICKET_RESOLVED: { ticketId: 't', number: 42 },
-      MESSAGE_RECEIVED: { fromName: 'A' },
+      STAFF_ACCESS_CHANGED: { roleLabel: 'Support' },
+      TASK_ASSIGNED: { taskId: 't', title: 'T', fromName: 'A', dueDate: '10/10/2026' },
+      TASK_DONE: { taskId: 't', title: 'T', byName: 'A' },
+      MESSAGE_RECEIVED: { fromName: 'A', bookingId: 'b1' },
       ANNOUNCEMENT: { title: 'T', body: 'B' },
     };
     for (const type of Object.keys(samples) as NotificationType[]) {

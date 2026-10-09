@@ -27,6 +27,10 @@ import { SearchModule } from './modules/search/search.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { SupportModule } from './modules/support/support.module.js';
+import { MessagesModule } from './modules/messages/messages.module.js';
+   import { AnnouncementsModule } from './modules/announcements/announcements.module.js';
+   import { ReleasesModule } from './modules/releases/releases.module.js';
+   import { StaffModule } from './modules/staff/staff.module.js';
 
 @Module({
   imports: [
@@ -51,6 +55,10 @@ import { SupportModule } from './modules/support/support.module.js';
     UploadsModule,
     NotificationsModule,
     SupportModule,
+    MessagesModule,
+    AnnouncementsModule,
+    ReleasesModule,
+    StaffModule,
   ],
   controllers: [AppController],
   providers: [
