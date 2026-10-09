@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,9 +6,10 @@ import type { PrismaService } from '../../prisma/prisma.service.js';
 import { SetAvatarDto } from './dto/set-avatar.dto.js';
 import { ProfileService } from './profile.service.js';
 
-function make(count = 1) {
+function make(count = 1, exists = true) {
   const updateMany = vi.fn().mockResolvedValue({ count });
-  return { service: new ProfileService({ user: { updateMany } } as unknown as PrismaService), updateMany };
+  const findUnique = vi.fn().mockResolvedValue(exists ? { id: 'u1' } : null);
+  return { service: new ProfileService({ user: { updateMany, findUnique } } as unknown as PrismaService), updateMany };
 }
 
 describe('ProfileService.setAvatar', () => {
@@ -16,17 +17,30 @@ describe('ProfileService.setAvatar', () => {
     const { service, updateMany } = make();
     const url = 'https://res.cloudinary.com/demo/image/upload/v1/soorooms/avatars/abc.jpg';
     expect(await service.setAvatar('u1', url)).toEqual({ avatarUrl: url });
-    expect(updateMany).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { avatarUrl: url } });
+    expect(updateMany).toHaveBeenCalledWith({ where: expect.objectContaining({ id: 'u1' }), data: { avatarUrl: url } });
   });
 
   it('supprimer la photo remet la valeur à vide', async () => {
     const { service, updateMany } = make();
     expect(await service.setAvatar('u1', null)).toEqual({ avatarUrl: null });
-    expect(updateMany).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { avatarUrl: null } });
+    expect(updateMany).toHaveBeenCalledWith({ where: expect.objectContaining({ id: 'u1' }), data: { avatarUrl: null } });
   });
 
   it("signale un compte introuvable", async () => {
-    await expect(make(0).service.setAvatar('ghost', null)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(make(0, false).service.setAvatar('ghost', null)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("verrouille la photo pendant et après la vérification d'identité, dans la requête d'écriture elle-même", async () => {
+    const { service, updateMany } = make();
+    await service.setAvatar('u1', null);
+    expect(updateMany.mock.calls[0][0].where).toEqual({
+      id: 'u1',
+      NOT: { kycStatus: { in: ['PENDING_REVIEW', 'APPROVED'] }, avatarUrl: { contains: '/soorooms/avatars/' } },
+    });
+  });
+
+  it("répond 409 (et non 404) quand la photo est verrouillée", async () => {
+    await expect(make(0, true).service.setAvatar('u1', null)).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

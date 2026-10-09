@@ -223,6 +223,7 @@ model KycDocument {
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   idCardUrl         String
   proofOfAddressUrl String?
+  profilePhotoUrl   String?
   status            KycStatus @default(PENDING_REVIEW)
   reviewerNote      String?
   submittedAt       DateTime  @default(now())

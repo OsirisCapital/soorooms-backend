@@ -77,7 +77,7 @@ export class AdminService {
           where: { status: 'PENDING_REVIEW' },
           orderBy: { submittedAt: 'desc' },
           take: 1,
-          select: { id: true, idCardUrl: true, proofOfAddressUrl: true, submittedAt: true },
+             select: { id: true, idCardUrl: true, proofOfAddressUrl: true, profilePhotoUrl: true, submittedAt: true },
         },
       },
     });

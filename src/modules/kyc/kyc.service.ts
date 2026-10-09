@@ -5,8 +5,8 @@
  * être resoumis, et l'admin doit pouvoir consulter les tentatives passées
  * en cas de litige.
  */
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { withoutPrivateSignature } from '../../common/utils/cloudinary-assets.js';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { isOwnCloudinaryAsset, withoutPrivateSignature } from '../../common/utils/cloudinary-assets.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import type { RejectKycDto } from './dto/reject-kyc.dto.js';
@@ -29,16 +29,36 @@ export class KycService {
       throw new ConflictException('Votre KYC est déjà approuvé.');
     }
 
+    // La photo de profil fait partie du dossier : le contrôleur la compare à la pièce d'identité pour
+    // s'assurer qu'il s'agit de la même personne. Une photo fournie par Google ne convient pas : elle
+    // n'a pas été choisie ici pour cette vérification.
+    const profilePhotoUrl = user?.avatarUrl ?? null;
+    if (!profilePhotoUrl || !isOwnCloudinaryAsset(profilePhotoUrl, 'avatar', process.env.CLOUDINARY_CLOUD_NAME)) {
+      throw new BadRequestException(
+        "Ajoutez d'abord votre photo de profil (une photo de votre visage) : elle permet de vérifier que vous êtes bien la personne de la pièce d'identité.",
+      );
+    }
+
     const document = await this.prisma.$transaction(async (tx) => {
+      // Le statut ne passe en attente que si la photo n'a pas changé depuis la lecture (ce que le
+      // contrôleur voit est exactement ce qui est affiché sur le profil) et si aucune demande n'a été
+      // déposée entre-temps (deux envois simultanés : un seul est retenu).
+      const locked = await tx.user.updateMany({
+        where: { id: userId, avatarUrl: profilePhotoUrl, kycStatus: { notIn: ['PENDING_REVIEW', 'APPROVED'] } },
+        data: { kycStatus: 'PENDING_REVIEW' },
+      });
+      if (locked.count === 0) {
+        throw new ConflictException("Votre demande n'a pas pu être enregistrée : votre photo a changé ou une demande est déjà en cours. Rechargez la page.");
+      }
       const created = await tx.kycDocument.create({
         data: {
           userId,
+          profilePhotoUrl,
           // Sans la signature Cloudinary : l'adresse gardée en base n'ouvre rien toute seule.
           idCardUrl: withoutPrivateSignature(dto.idCardUrl),
           proofOfAddressUrl: dto.proofOfAddressUrl ? withoutPrivateSignature(dto.proofOfAddressUrl) : undefined,
         },
       });
-      await tx.user.update({ where: { id: userId }, data: { kycStatus: 'PENDING_REVIEW' } });
       return created;
     });
 

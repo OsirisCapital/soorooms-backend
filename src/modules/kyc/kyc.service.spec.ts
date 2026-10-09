@@ -1,5 +1,5 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { describe, expect, it, vi } from 'vitest';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationsService } from '../notifications/notifications.service.js';
 import { KycService } from './kyc.service.js';
@@ -105,14 +105,82 @@ describe('KycService — notifications', () => {
   });
 });
 
+const AVATAR = 'https://res.cloudinary.com/demo/image/upload/v1/soorooms/avatars/me.jpg';
+const ID_URL = 'https://res.cloudinary.com/demo/image/authenticated/v1/soorooms/kyc/id.jpg';
+
+function makeSubmit(user: Record<string, unknown> | null, updated = 1) {
+  const tx = {
+    kycDocument: { create: vi.fn().mockResolvedValue({ id: 'doc-9' }) },
+    user: { updateMany: vi.fn().mockResolvedValue({ count: updated }) },
+  };
+  const prisma = {
+    user: { findUnique: vi.fn().mockResolvedValue(user) },
+    $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+  };
+  const notifications = { notifyStaff: vi.fn().mockResolvedValue(undefined) };
+  return { service: new KycService(prisma as unknown as PrismaService, notifications as unknown as NotificationsService), tx, prisma, notifications };
+}
+
+describe('KycService.submit — photo de profil', () => {
+  beforeEach(() => {
+    process.env.CLOUDINARY_CLOUD_NAME = 'demo';
+  });
+  afterEach(() => {
+    delete process.env.CLOUDINARY_CLOUD_NAME;
+  });
+  const base = { id: 'user-1', fullName: 'Marie', kycStatus: 'NOT_SUBMITTED' };
+
+  it('refuse la demande sans photo de profil, sans rien écrire', async () => {
+    const { service, prisma, notifications } = makeSubmit({ ...base, avatarUrl: null });
+    await expect(service.submit('user-1', { idCardUrl: ID_URL } as never)).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(notifications.notifyStaff).not.toHaveBeenCalled();
+  });
+
+  it("refuse une photo qui ne vient pas de l'application (par exemple celle de Google)", async () => {
+    const { service, prisma } = makeSubmit({ ...base, avatarUrl: 'https://lh3.googleusercontent.com/a/abc' });
+    await expect(service.submit('user-1', { idCardUrl: ID_URL } as never)).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('garde la photo du moment du dépôt dans le dossier, pour le contrôleur', async () => {
+    const { service, tx } = makeSubmit({ ...base, avatarUrl: AVATAR });
+    await service.submit('user-1', { idCardUrl: ID_URL } as never);
+    expect(tx.kycDocument.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: 'user-1', profilePhotoUrl: AVATAR }) });
+  });
+
+  it("ne passe en attente que si la photo n'a pas changé et si aucune demande n'est en cours", async () => {
+    const { service, tx } = makeSubmit({ ...base, avatarUrl: AVATAR });
+    await service.submit('user-1', { idCardUrl: ID_URL } as never);
+    expect(tx.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user-1', avatarUrl: AVATAR, kycStatus: { notIn: ['PENDING_REVIEW', 'APPROVED'] } },
+      data: { kycStatus: 'PENDING_REVIEW' },
+    });
+  });
+
+  it("répond 409 sans créer de dossier si la photo a changé ou qu'une demande vient d'être déposée", async () => {
+    const { service, tx, notifications } = makeSubmit({ ...base, avatarUrl: AVATAR }, 0);
+    await expect(service.submit('user-1', { idCardUrl: ID_URL } as never)).rejects.toThrow(ConflictException);
+    expect(tx.kycDocument.create).not.toHaveBeenCalled();
+    expect(notifications.notifyStaff).not.toHaveBeenCalled();
+  });
+});
+
 describe('KycService.submit — alerte équipe', () => {
+  beforeEach(() => {
+    process.env.CLOUDINARY_CLOUD_NAME = 'demo';
+  });
+  afterEach(() => {
+    delete process.env.CLOUDINARY_CLOUD_NAME;
+  });
+
   it("prévient l'équipe habilitée « kyc.review », sans alerter la personne qui dépose", async () => {
     const tx = {
       kycDocument: { create: vi.fn().mockResolvedValue({ id: 'doc-9' }) },
-      user: { update: vi.fn().mockResolvedValue({}) },
+      user: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
-      user: { findUnique: vi.fn().mockResolvedValue({ id: 'user-1', fullName: 'Marie Ngo', kycStatus: 'NOT_STARTED' }) },
+      user: { findUnique: vi.fn().mockResolvedValue({ id: 'user-1', fullName: 'Marie Ngo', kycStatus: 'NOT_STARTED', avatarUrl: AVATAR }) },
       $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
     };
     const notifications = { notifyStaff: vi.fn().mockResolvedValue(undefined) };
