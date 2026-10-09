@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bookingLink, clip, fcfa, isInternalPath, renderNotification, type NotificationPayloads, type NotificationType } from './notification-types.js';
+import { bookingLink, clip, fcfa, isInternalPath, renderNotification, ticketRef, type NotificationPayloads, type NotificationType } from './notification-types.js';
 
 describe('fcfa', () => {
   it('sépare les milliers par une espace ordinaire', () => {
@@ -25,6 +25,13 @@ describe('isInternalPath', () => {
     for (const bad of ['https://evil.test', '//evil.test', '/\\evil.test', 'javascript:alert(1)', '', undefined, 42, `/${'a'.repeat(300)}`]) {
       expect(isInternalPath(bad)).toBe(false);
     }
+  });
+});
+
+describe('ticketRef', () => {
+  it('donne un numéro lisible sur 4 chiffres au minimum', () => {
+    expect(ticketRef(42)).toBe('SR-0042');
+    expect(ticketRef(12345)).toBe('SR-12345');
   });
 });
 
@@ -87,6 +94,10 @@ describe('renderNotification', () => {
       DISPUTE_OPENED_STAFF: { bookingId: 'b' },
       PROPERTY_PUBLISHED: { propertyId: 'p', propertyTitle: 'P' },
       PROPERTY_SUSPENDED: { propertyId: 'p', propertyTitle: 'P' },
+      SUPPORT_TICKET_NEW: { ticketId: 't', number: 42, subject: 'Aide' },
+      SUPPORT_USER_REPLY: { ticketId: 't', number: 42, fromName: 'A' },
+      SUPPORT_REPLY: { ticketId: 't', number: 42 },
+      SUPPORT_TICKET_RESOLVED: { ticketId: 't', number: 42 },
       MESSAGE_RECEIVED: { fromName: 'A' },
       ANNOUNCEMENT: { title: 'T', body: 'B' },
     };

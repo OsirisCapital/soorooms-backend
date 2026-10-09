@@ -26,6 +26,7 @@ import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { SearchModule } from './modules/search/search.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { SupportModule } from './modules/support/support.module.js';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     FavoritesModule,
     UploadsModule,
     NotificationsModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [

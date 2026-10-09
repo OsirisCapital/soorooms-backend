@@ -28,6 +28,11 @@ export type NotificationPayloads = {
   // Logements
   PROPERTY_PUBLISHED: { propertyId: string; propertyTitle: string };
   PROPERTY_SUSPENDED: { propertyId: string; propertyTitle: string };
+  // Support
+  SUPPORT_TICKET_NEW: { ticketId: string; number: number; subject: string }; // → équipe
+  SUPPORT_USER_REPLY: { ticketId: string; number: number; fromName: string }; // → équipe
+  SUPPORT_REPLY: { ticketId: string; number: number }; // → utilisateur
+  SUPPORT_TICKET_RESOLVED: { ticketId: string; number: number }; // → utilisateur
   // Autres
   MESSAGE_RECEIVED: { fromName: string };
   ANNOUNCEMENT: { title: string; body: string; href?: string };
@@ -48,6 +53,11 @@ export function clip(text: string, max = MAX_FREE_TEXT): string {
 /** 15000 → « 15 000 FCFA » (espace ordinaire : s'affiche pareil partout). */
 export function fcfa(amount: number): string {
   return `${String(Math.round(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
+}
+
+/** Numéro lisible donné à l'utilisateur : 42 → « SR-0042 ». */
+export function ticketRef(number: number): string {
+  return `SR-${String(number).padStart(4, '0')}`;
 }
 
 export function bookingLink(audience: Audience, bookingId: string): string {
@@ -150,6 +160,26 @@ const RENDERERS: Renderers = {
     title: 'Logement suspendu',
     body: `« ${clip(p.propertyTitle)} » n'est plus visible. Contactez le support pour en savoir plus.`,
     linkUrl: `/hote/logements/${p.propertyId}`,
+  }),
+  SUPPORT_TICKET_NEW: (p) => ({
+    title: 'Nouvelle demande au support',
+    body: `${ticketRef(p.number)} : ${clip(p.subject, 100)}`,
+    linkUrl: `/admin/support/${p.ticketId}`,
+  }),
+  SUPPORT_USER_REPLY: (p) => ({
+    title: 'Réponse sur une demande',
+    body: `${clip(p.fromName)} a répondu à ${ticketRef(p.number)}.`,
+    linkUrl: `/admin/support/${p.ticketId}`,
+  }),
+  SUPPORT_REPLY: (p) => ({
+    title: 'Le support vous a répondu',
+    body: `Votre demande ${ticketRef(p.number)} a une nouvelle réponse.`,
+    linkUrl: `/profil/aide/tickets/${p.ticketId}`,
+  }),
+  SUPPORT_TICKET_RESOLVED: (p) => ({
+    title: 'Demande résolue ✓',
+    body: `Votre demande ${ticketRef(p.number)} est marquée comme résolue. Répondez-y si le problème persiste.`,
+    linkUrl: `/profil/aide/tickets/${p.ticketId}`,
   }),
   MESSAGE_RECEIVED: (p) => ({
     title: 'Nouveau message',
