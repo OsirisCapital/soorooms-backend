@@ -250,9 +250,7 @@ export class NotchPayGateway implements PaymentGateway {
           name: params.beneficiary.name,
           phone: params.beneficiary.phone,
           country: 'CM',
-          currency: params.currency,
-          type: 'mobile_money',
-          // L'API réelle exige aussi le canal et le numéro de compte (le numéro Mobile Money).
+          // Champs de la référence « create a beneficiary » : channel, name, account_number + phone.
           channel: params.beneficiary.channel,
           account_number: params.beneficiary.phone,
         },
@@ -268,22 +266,34 @@ export class NotchPayGateway implements PaymentGateway {
       if (error instanceof BadGatewayException) {
         throw new ServiceUnavailableException("Notch Pay n'a pas pu enregistrer le bénéficiaire. Réessayez dans un instant.");
       }
+      if (error instanceof UnprocessableEntityException) {
+        // On précise l'étape : « bénéficiaire » ou « transfert » (utile pour diagnostiquer).
+        throw new UnprocessableEntityException(`[création du bénéficiaire] ${error.message}`.slice(0, 300));
+      }
       throw error;
     }
 
-    const json = await this.request(
-      'POST',
-      '/transfers',
-      {
-        amount: Math.round(params.amount), // le FCFA n'a pas de décimales
-        currency: params.currency,
-        channel: params.beneficiary.channel,
-        description: params.description,
-        reference: params.reference,
-        beneficiary: beneficiaryId,
-      },
-      { grant: true },
-    );
+    let json: Record<string, unknown>;
+    try {
+      json = await this.request(
+        'POST',
+        '/transfers',
+        {
+          amount: Math.round(params.amount), // le FCFA n'a pas de décimales
+          currency: params.currency,
+          channel: params.beneficiary.channel,
+          description: params.description,
+          reference: params.reference,
+          beneficiary: beneficiaryId,
+        },
+        { grant: true },
+      );
+    } catch (error) {
+      if (error instanceof UnprocessableEntityException) {
+        throw new UnprocessableEntityException(`[transfert] ${error.message}`.slice(0, 300));
+      }
+      throw error;
+    }
     const state = this.transferFrom(json.transfer ?? json);
     if (!state) {
       this.logger.error(`Réponse Notch Pay inattendue à un transfert : ${JSON.stringify(json).slice(0, 500)}`);
