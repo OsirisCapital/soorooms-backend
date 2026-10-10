@@ -241,40 +241,51 @@ export class NotchPayGateway implements PaymentGateway {
   async sendTransfer(params: SendTransferParams): Promise<TransferState> {
     // Notch Pay veut l'identifiant d'un bénéficiaire (« ben_… ») : on le crée d'abord. Si cette
     // première étape échoue, RIEN n'a été envoyé : l'échec est donc toujours « sûr » (réessai permis).
-    let beneficiaryId: string;
-    try {
-      const created = await this.request(
-        'POST',
-        '/beneficiaries',
-        {
-          name: params.beneficiary.name,
-          phone: params.beneficiary.phone,
-          country: 'CM',
-          // Combinaison qui a passé la validation du canal chez Notch Pay (sans type/currency, le
-          // canal était refusé : « The selected channel is invalid »).
-          currency: params.currency,
-          type: 'mobile_money',
-          channel: params.beneficiary.channel,
-          account_number: params.beneficiary.phone,
-        },
-        { grant: true },
-      );
-      const id = pickString(isObject(created.beneficiary) ? created.beneficiary : created, 'id');
-      if (!id) {
-        this.logger.error(`Réponse Notch Pay inattendue à la création d'un bénéficiaire : ${JSON.stringify(created).slice(0, 500)}`);
-        throw new ServiceUnavailableException("Notch Pay n'a pas créé le bénéficiaire (réponse inattendue).");
+    // Le canal du bénéficiaire est parfois refusé selon le compte (« The selected channel is invalid »).
+    // On essaie donc le canal de l'hôte, puis « cm.mobile » (routage automatique MTN/Orange) et, en
+    // mode TEST uniquement, l'autre opérateur. Tant que la création échoue, rien n'a été envoyé.
+    const { publicKey } = this.keys();
+    const candidates = [params.beneficiary.channel, 'cm.mobile'];
+    if (publicKey.startsWith('pk_test')) candidates.push(params.beneficiary.channel === 'cm.mtn' ? 'cm.orange' : 'cm.mtn');
+    let beneficiaryId = '';
+    let usedChannel: string = params.beneficiary.channel;
+    let lastError: unknown;
+    for (const channel of [...new Set(candidates)]) {
+      try {
+        const created = await this.request(
+          'POST',
+          '/beneficiaries',
+          {
+            name: params.beneficiary.name,
+            phone: params.beneficiary.phone,
+            country: 'CM',
+            currency: params.currency,
+            type: 'mobile_money',
+            channel,
+            account_number: params.beneficiary.phone,
+          },
+          { grant: true },
+        );
+        const id = pickString(isObject(created.beneficiary) ? created.beneficiary : created, 'id');
+        if (!id) {
+          this.logger.error(`Réponse Notch Pay inattendue à la création d'un bénéficiaire : ${JSON.stringify(created).slice(0, 500)}`);
+          throw new ServiceUnavailableException("Notch Pay n'a pas créé le bénéficiaire (réponse inattendue).");
+        }
+        beneficiaryId = id;
+        usedChannel = channel;
+        break;
+      } catch (error) {
+        if (error instanceof BadGatewayException) {
+          throw new ServiceUnavailableException("Notch Pay n'a pas pu enregistrer le bénéficiaire. Réessayez dans un instant.");
+        }
+        if (error instanceof UnprocessableEntityException) {
+          lastError = new UnprocessableEntityException(`[création du bénéficiaire] ${error.message}`.slice(0, 300));
+          if (/channel/i.test(error.message)) continue; // canal refusé : on tente le suivant
+        }
+        throw lastError ?? error;
       }
-      beneficiaryId = id;
-    } catch (error) {
-      if (error instanceof BadGatewayException) {
-        throw new ServiceUnavailableException("Notch Pay n'a pas pu enregistrer le bénéficiaire. Réessayez dans un instant.");
-      }
-      if (error instanceof UnprocessableEntityException) {
-        // On précise l'étape : « bénéficiaire » ou « transfert » (utile pour diagnostiquer).
-        throw new UnprocessableEntityException(`[création du bénéficiaire] ${error.message}`.slice(0, 300));
-      }
-      throw error;
     }
+    if (!beneficiaryId) throw lastError;
 
     let json: Record<string, unknown>;
     try {
@@ -284,7 +295,7 @@ export class NotchPayGateway implements PaymentGateway {
         {
           amount: Math.round(params.amount), // le FCFA n'a pas de décimales
           currency: params.currency,
-          channel: params.beneficiary.channel,
+          channel: usedChannel,
           description: params.description,
           reference: params.reference,
           beneficiary: beneficiaryId,

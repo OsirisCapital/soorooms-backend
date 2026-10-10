@@ -53,6 +53,16 @@ describe('NotchPayGateway — versements', () => {
     }
   });
 
+  it('si le canal du bénéficiaire est refusé, essaie cm.mobile puis envoie avec ce canal', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply(422, { message: 'The selected channel is invalid.', errors: { channel: ['The selected channel is invalid.'] } }))
+      .mockResolvedValueOnce(reply(201, { beneficiary: { id: 'ben_7' } }))
+      .mockResolvedValueOnce(reply(201, { transfer: { id: 'trn_1', reference: 'po_p1_1', status: 'pending', amount: 27000 } }));
+    await gateway.sendTransfer({ ...PARAMS });
+    expect(JSON.parse((fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string)).toMatchObject({ channel: 'cm.mobile' });
+    expect(JSON.parse((fetchMock.mock.calls[2] as [string, RequestInit])[1].body as string)).toMatchObject({ channel: 'cm.mobile', beneficiary: 'ben_7' });
+  });
+
   it('un 404 veut dire « jamais reçu » (null), pas une erreur', async () => {
     fetchMock.mockResolvedValue(reply(404, { message: 'not found' }));
     await expect(gateway.getTransfer('inconnue')).resolves.toBeNull();
