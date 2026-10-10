@@ -15,3 +15,10 @@ export class SetPayoutDetailsDto {
   @MaxLength(80)
   accountName!: string;
 }
+
+export class MarkPayoutPaidDto {
+  @IsString()
+  @MinLength(3, { message: "Indiquez la référence de l'opération (ex. identifiant de la transaction Mobile Money)." })
+  @MaxLength(80)
+  reference!: string;
+}

@@ -5,7 +5,7 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { PermissionsGuard } from '../../common/guards/permissions.guard.js';
 import type { UserRole } from '../../prisma/client.js';
-import { SetPayoutDetailsDto } from './dto/payout-details.dto.js';
+import { MarkPayoutPaidDto, SetPayoutDetailsDto } from './dto/payout-details.dto.js';
 import { PayoutsService } from './payouts.service.js';
 
 /** Espace finance : file des versements à envoyer. */
@@ -26,6 +26,12 @@ export class AdminPayoutsController {
   @Post(':id/send')
   send(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.payouts.send(id, user.id);
+  }
+
+  @RequirePermission('payouts.manage')
+  @Post(':id/mark-paid')
+  markPaid(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MarkPayoutPaidDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.payouts.markPaidManually(id, user.id, dto.reference);
   }
 
   @RequirePermission('payouts.manage')

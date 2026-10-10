@@ -119,6 +119,25 @@ describe('PayoutsService.send', () => {
   });
 });
 
+describe('PayoutsService.markPaidManually', () => {
+  it("marque payé, libère le séquestre, écrit l'audit avec la preuve et prévient l'hôte", async () => {
+    const c = make();
+    await c.service.markPaidManually('p1', 'fin', ' OM-12345 ');
+    expect(c.tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'payout.manual_paid', meta: expect.objectContaining({ proof: 'OM-12345' }) }) }));
+    expect(c.tx.escrowVault.updateMany).toHaveBeenCalled();
+    expect(c.notifications.notify).toHaveBeenCalledWith('h1', 'PAYOUT_RELEASED', expect.objectContaining({ bookingId: 'b1' }));
+    expect(c.gateway.sendTransfer).not.toHaveBeenCalled();
+  });
+
+  it('refuse si un envoi Notch Pay est en vol ou déjà payé', async () => {
+    for (const status of ['SENDING', 'PROCESSING', 'PAID']) {
+      const c = make({ payout: { ...PAYOUT, status } });
+      await expect(c.service.markPaidManually('p1', 'fin', 'OM-1')).rejects.toBeInstanceOf(ConflictException);
+      expect(c.tx.escrowVault.updateMany).not.toHaveBeenCalled();
+    }
+  });
+});
+
 describe('PayoutsService.check', () => {
   it("Notch Pay ne connaît pas la référence d'un envoi jamais abouti : échec sûr", async () => {
     const c = make({ payout: { ...PAYOUT, status: 'SENDING', attempts: 1, reference: 'po_p1_1' } });

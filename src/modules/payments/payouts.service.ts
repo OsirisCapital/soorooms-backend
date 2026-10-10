@@ -151,6 +151,8 @@ export class PayoutsService {
         beneficiary: row.beneficiaryPhone ? { channel: row.beneficiaryChannel, phone: row.beneficiaryPhone, accountName: row.beneficiaryName } : null,
         canSend: SENDABLE.includes(row.status) && complete,
         canCheck: IN_FLIGHT.includes(row.status) && !!row.reference,
+        // Virement fait à la main par la finance (hors Notch Pay) : permis tant que rien n'est en vol.
+        canMarkPaid: SENDABLE.includes(row.status),
       };
     });
   }
@@ -225,6 +227,35 @@ export class PayoutsService {
         });
       }
     }
+    return this.view(payout.id);
+  }
+
+  /**
+   * La finance a versé l'argent elle-même (Orange Money / MTN, hors Notch Pay) et en saisit la preuve.
+   * Même effet qu'un transfert réussi : PAID, séquestre libéré, hôte prévenu — mais avec un audit dédié
+   * contenant la référence de l'opération. Refusé si un envoi Notch Pay est en vol (risque de double versement).
+   */
+  async markPaidManually(payoutId: string, actorId: string, proof: string) {
+    const payout = await this.prisma.payout.findUnique({ where: { id: payoutId }, include: { escrow: { select: { bookingId: true } } } });
+    if (!payout) throw new NotFoundException('Versement introuvable.');
+    if (!SENDABLE.includes(payout.status)) {
+      throw new ConflictException(payout.status === 'PAID' ? 'Ce versement a déjà été effectué.' : 'Un envoi Notch Pay est en cours : utilisez « Vérifier l’état » avant toute autre action.');
+    }
+    const reference = proof.trim().slice(0, 80);
+    const amount = Number(payout.amount);
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.payout.updateMany({
+        where: { id: payout.id, status: { in: SENDABLE }, attempts: payout.attempts },
+        data: { status: 'SENDING', sentById: actorId, sentAt: new Date(), failureReason: null },
+      });
+      if (res.count === 0) return false;
+      await tx.auditLog.create({
+        data: { actorId, action: 'payout.manual_paid', targetType: 'Payout', targetId: payout.id, meta: { bookingId: payout.escrow.bookingId, amount, proof: reference } },
+      });
+      return true;
+    });
+    if (!claimed) throw new ConflictException('Ce versement vient d’être pris en charge par quelqu’un d’autre.');
+    await this.applyState(payout.id, { status: 'COMPLETE', gatewayRef: `manuel:${reference}`, reference: payout.reference ?? `manuel_${payout.id}` });
     return this.view(payout.id);
   }
 
