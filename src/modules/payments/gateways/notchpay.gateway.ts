@@ -252,6 +252,9 @@ export class NotchPayGateway implements PaymentGateway {
           country: 'CM',
           currency: params.currency,
           type: 'mobile_money',
+          // L'API réelle exige aussi le canal et le numéro de compte (le numéro Mobile Money).
+          channel: params.beneficiary.channel,
+          account_number: params.beneficiary.phone,
         },
         { grant: true },
       );

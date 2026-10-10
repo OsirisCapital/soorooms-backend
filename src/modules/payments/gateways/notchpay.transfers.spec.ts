@@ -26,7 +26,7 @@ describe('NotchPayGateway — versements', () => {
     const state = await gateway.sendTransfer({ ...PARAMS });
     const [url1, init1] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url1).toBe('https://api.test/beneficiaries');
-    expect(JSON.parse(init1.body as string)).toMatchObject({ name: 'Awa Ngono', phone: '+237670000000', country: 'CM', currency: 'XAF', type: 'mobile_money' });
+    expect(JSON.parse(init1.body as string)).toMatchObject({ name: 'Awa Ngono', phone: '+237670000000', country: 'CM', currency: 'XAF', type: 'mobile_money', channel: 'cm.mtn', account_number: '+237670000000' });
     const [url2, init2] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url2).toBe('https://api.test/transfers');
     expect(init2.headers).toMatchObject({ Authorization: 'pk_test', 'X-Grant': 'sk_test' });
