@@ -250,7 +250,10 @@ export class NotchPayGateway implements PaymentGateway {
           name: params.beneficiary.name,
           phone: params.beneficiary.phone,
           country: 'CM',
-          // Champs de la référence « create a beneficiary » : channel, name, account_number + phone.
+          // Combinaison qui a passé la validation du canal chez Notch Pay (sans type/currency, le
+          // canal était refusé : « The selected channel is invalid »).
+          currency: params.currency,
+          type: 'mobile_money',
           channel: params.beneficiary.channel,
           account_number: params.beneficiary.phone,
         },
