@@ -19,14 +19,25 @@ describe('NotchPayGateway — versements', () => {
     delete process.env.NOTCHPAY_PRIVATE_KEY;
   });
 
-  it('envoie le transfert avec la clé publique ET la clé privée (X-Grant), montant entier', async () => {
-    fetchMock.mockResolvedValue(reply(201, { transfer: { id: 'trn_1', reference: 'po_p1_1', status: 'pending', amount: 27000 } }));
+  it('crée le bénéficiaire puis envoie le transfert avec les deux clés, montant entier', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply(201, { beneficiary: { id: 'ben_9', name: 'Awa Ngono' } }))
+      .mockResolvedValueOnce(reply(201, { transfer: { id: 'trn_1', reference: 'po_p1_1', status: 'pending', amount: 27000 } }));
     const state = await gateway.sendTransfer({ ...PARAMS });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.test/transfers');
-    expect(init.headers).toMatchObject({ Authorization: 'pk_test', 'X-Grant': 'sk_test' });
-    expect(JSON.parse(init.body as string)).toMatchObject({ amount: 27000, currency: 'XAF', channel: 'cm.mtn', reference: 'po_p1_1', beneficiary_data: { name: 'Awa Ngono', phone: '+237670000000' } });
+    const [url1, init1] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url1).toBe('https://api.test/beneficiaries');
+    expect(JSON.parse(init1.body as string)).toMatchObject({ name: 'Awa Ngono', phone: '+237670000000', country: 'CM', currency: 'XAF', type: 'mobile_money' });
+    const [url2, init2] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url2).toBe('https://api.test/transfers');
+    expect(init2.headers).toMatchObject({ Authorization: 'pk_test', 'X-Grant': 'sk_test' });
+    expect(JSON.parse(init2.body as string)).toMatchObject({ amount: 27000, currency: 'XAF', channel: 'cm.mtn', reference: 'po_p1_1', beneficiary: 'ben_9' });
     expect(state).toMatchObject({ status: 'PENDING', gatewayRef: 'trn_1', reference: 'po_p1_1' });
+  });
+
+  it("si la création du bénéficiaire échoue, aucun transfert n'est tenté et l'échec est « sûr » (pas un 502)", async () => {
+    fetchMock.mockResolvedValueOnce(reply(500, {}));
+    await expect(gateway.sendTransfer({ ...PARAMS })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('sans clé privée : refuse avant tout appel réseau', async () => {
@@ -48,8 +59,10 @@ describe('NotchPayGateway — versements', () => {
   });
 
   it('un 422 est un refus clair avec le motif de Notch Pay', async () => {
-    fetchMock.mockResolvedValue(reply(422, { message: 'Insufficient balance' }));
+    fetchMock.mockResolvedValueOnce(reply(201, { beneficiary: { id: 'ben_9' } })).mockResolvedValueOnce(reply(422, { message: 'Insufficient balance' }));
     await expect(gateway.sendTransfer({ ...PARAMS })).rejects.toThrow('Insufficient balance');
+    fetchMock.mockResolvedValue(reply(422, { message: 'Invalid', errors: { beneficiary: ['Invalid beneficiary format.'] } }));
+    await expect(gateway.sendTransfer({ ...PARAMS })).rejects.toThrow('beneficiary: Invalid beneficiary format.');
     fetchMock.mockResolvedValue(reply(422, { message: 'x' }));
     await expect(gateway.sendTransfer({ ...PARAMS })).rejects.toBeInstanceOf(UnprocessableEntityException);
   });

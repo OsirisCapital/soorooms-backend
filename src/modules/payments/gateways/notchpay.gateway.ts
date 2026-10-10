@@ -239,6 +239,35 @@ export class NotchPayGateway implements PaymentGateway {
   // ---------------------------------------------------------------------
 
   async sendTransfer(params: SendTransferParams): Promise<TransferState> {
+    // Notch Pay veut l'identifiant d'un bénéficiaire (« ben_… ») : on le crée d'abord. Si cette
+    // première étape échoue, RIEN n'a été envoyé : l'échec est donc toujours « sûr » (réessai permis).
+    let beneficiaryId: string;
+    try {
+      const created = await this.request(
+        'POST',
+        '/beneficiaries',
+        {
+          name: params.beneficiary.name,
+          phone: params.beneficiary.phone,
+          country: 'CM',
+          currency: params.currency,
+          type: 'mobile_money',
+        },
+        { grant: true },
+      );
+      const id = pickString(isObject(created.beneficiary) ? created.beneficiary : created, 'id');
+      if (!id) {
+        this.logger.error(`Réponse Notch Pay inattendue à la création d'un bénéficiaire : ${JSON.stringify(created).slice(0, 500)}`);
+        throw new ServiceUnavailableException("Notch Pay n'a pas créé le bénéficiaire (réponse inattendue).");
+      }
+      beneficiaryId = id;
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw new ServiceUnavailableException("Notch Pay n'a pas pu enregistrer le bénéficiaire. Réessayez dans un instant.");
+      }
+      throw error;
+    }
+
     const json = await this.request(
       'POST',
       '/transfers',
@@ -248,7 +277,7 @@ export class NotchPayGateway implements PaymentGateway {
         channel: params.beneficiary.channel,
         description: params.description,
         reference: params.reference,
-        beneficiary_data: { name: params.beneficiary.name, phone: params.beneficiary.phone },
+        beneficiary: beneficiaryId,
       },
       { grant: true },
     );
@@ -359,10 +388,10 @@ export class NotchPayGateway implements PaymentGateway {
       this.logger.error(`Notch Pay a répondu ${response.status} (${method} ${path}) : ${text.slice(0, 500)}`);
       if (options.grant && response.status === 422) {
         // Transfert refusé : on rend le motif de Notch Pay lisible par la finance.
-       const details = isObject(json.errors)
-  ? Object.entries(json.errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`).join(' ; ')
-  : '';
-const reason = [pickString(json, 'message') ?? 'données refusées', details].filter(Boolean).join(' — ');
+        const details = isObject(json.errors)
+          ? Object.entries(json.errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`).join(' ; ')
+          : '';
+        const reason = [pickString(json, 'message') ?? 'données refusées', details].filter(Boolean).join(' — ');
         throw new UnprocessableEntityException(`Notch Pay a refusé le transfert : ${reason}`.slice(0, 300));
       }
       if (response.status === 422) {
