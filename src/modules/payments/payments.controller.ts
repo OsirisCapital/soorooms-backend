@@ -42,9 +42,10 @@ export class PaymentsController {
   @SkipThrottle() // appelé par l'agrégateur depuis ses propres IP : la limite par IP n'a pas de sens ici
   @HttpCode(HttpStatus.OK)
   @Post('webhook')
-  webhook(
+   webhook(
     @Req() req: RawBodyRequest<Request>,
     @Headers('x-notch-signature') signature: string | undefined,
+    @Headers('x-notchpay-signature') legacySignature: string | undefined,
   ) {
     if (!req.rawBody) {
       // Ne devrait jamais arriver si rawBody: true est bien positionné
@@ -52,6 +53,6 @@ export class PaymentsController {
       // silencieux sur req.rawBody undefined.
       throw new Error('Corps brut de la requête indisponible — vérifier la configuration rawBody dans main.ts.');
     }
-    return this.paymentsService.handleWebhook(req.rawBody, signature);
+        return this.paymentsService.handleWebhook(req.rawBody, signature ?? legacySignature);
   }
 }
