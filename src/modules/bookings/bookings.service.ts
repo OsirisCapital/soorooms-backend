@@ -18,6 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { isExpired, MAX_OPEN_REQUESTS, RESPONSE_WINDOW_MS } from './request-window.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
@@ -65,6 +66,15 @@ export class BookingsService {
       throw new ForbiddenException('Vous ne pouvez pas réserver un logement que vous gérez.');
     }
 
+    // Quota : un voyageur ne bloque pas plusieurs hôtes à la fois sans réponse.
+    await this.expireStale({ travelerId });
+    const open = await this.prisma.booking.count({ where: { travelerId, status: 'NEGOTIATING' } });
+    if (open >= MAX_OPEN_REQUESTS) {
+      throw new ConflictException(
+        `Vous avez déjà ${MAX_OPEN_REQUESTS} demandes en attente de réponse. Attendez une réponse (2 h maximum) avant d'en envoyer une autre.`,
+      );
+    }
+
     await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate);
 
     const proposedPrice = dto.proposedPrice ?? this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate);
@@ -91,6 +101,7 @@ export class BookingsService {
   }
 
   async findMine(travelerId: string) {
+    await this.expireStale({ travelerId });
     return this.prisma.booking.findMany({
       where: { travelerId },
       include: { room: true, offers: { orderBy: { createdAt: 'desc' }, take: 1 } },
@@ -99,6 +110,7 @@ export class BookingsService {
   }
 
   async findForProperty(propertyId: string) {
+    await this.expireStale({ propertyId });
     return this.prisma.booking.findMany({
       where: { room: { propertyId } },
       include: { room: true, offers: { orderBy: { createdAt: 'desc' }, take: 1 } },
@@ -107,6 +119,7 @@ export class BookingsService {
   }
 
   async findOne(bookingId: string, userId: string) {
+    await this.expireStale({ bookingId });
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     return booking;
@@ -120,6 +133,7 @@ export class BookingsService {
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     this.assertNegotiating(booking);
+    await this.assertNotExpired(booking);
 
     const currentOffer = booking.offers[0];
     if (currentOffer.proposedByUserId === userId) {
@@ -145,6 +159,7 @@ export class BookingsService {
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     this.assertNegotiating(booking);
+    await this.assertNotExpired(booking);
 
     const currentOffer = booking.offers[0];
     if (currentOffer.proposedByUserId === userId) {
@@ -186,6 +201,7 @@ export class BookingsService {
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     this.assertNegotiating(booking);
+    await this.assertNotExpired(booking);
 
     const currentOffer = booking.offers[0];
 
@@ -359,6 +375,46 @@ export class BookingsService {
     const isCollaborator = booking.room.property.collaborators.some((c) => c.userId === userId);
     if (!isTraveler && !isCollaborator) {
       throw new ForbiddenException("Vous n'êtes pas partie prenante de cette réservation.");
+    }
+  }
+
+  /** Une offre restée sans réponse plus de 2 h ferme la demande, avant toute autre action. */
+  private async assertNotExpired(booking: { id: string; offers: { createdAt: Date }[] }) {
+    const current = booking.offers[0];
+    if (current && isExpired(current.createdAt)) {
+      await this.expireStale({ bookingId: booking.id });
+      throw new ConflictException('Cette demande a expiré : personne n’a répondu dans les 2 heures.');
+    }
+  }
+
+  /**
+   * Annule les demandes dont l'offre en attente a plus de 2 h (pas de tâche planifiée : on nettoie
+   * à chaque lecture ou action concernée) et prévient les deux parties.
+   */
+  private async expireStale(scope: { travelerId?: string; propertyId?: string; bookingId?: string }) {
+    const cutoff = new Date(Date.now() - RESPONSE_WINDOW_MS);
+    const stale = await this.prisma.booking.findMany({
+      where: {
+        status: 'NEGOTIATING',
+        ...(scope.travelerId ? { travelerId: scope.travelerId } : {}),
+        ...(scope.propertyId ? { room: { propertyId: scope.propertyId } } : {}),
+        ...(scope.bookingId ? { id: scope.bookingId } : {}),
+        offers: { some: { status: 'PENDING', createdAt: { lte: cutoff } } },
+      },
+      include: { room: { include: { property: { include: { collaborators: true } } } } },
+      take: 100,
+    });
+    for (const booking of stale) {
+      const closed = await this.prisma.$transaction(async (tx) => {
+        await tx.priceOffer.updateMany({ where: { bookingId: booking.id, status: 'PENDING' }, data: { status: 'REJECTED' } });
+        return tx.booking.updateMany({ where: { id: booking.id, status: 'NEGOTIATING' }, data: { status: 'CANCELLED' } });
+      });
+      if (closed.count === 0) continue;
+      const title = booking.room.property.title;
+      await this.notifications.notify(booking.travelerId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'traveler', propertyTitle: title });
+      for (const c of booking.room.property.collaborators) {
+        await this.notifications.notify(c.userId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'host', propertyTitle: title });
+      }
     }
   }
 

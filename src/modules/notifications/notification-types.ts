@@ -17,6 +17,7 @@ export type NotificationPayloads = {
   OFFER_RECEIVED: { bookingId: string; audience: Audience; amount: number; fromName: string };
   OFFER_ACCEPTED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
   OFFER_REJECTED: { bookingId: string; audience: Audience; propertyTitle: string };
+  BOOKING_EXPIRED: { bookingId: string; audience: Audience; propertyTitle: string }; // demande sans réponse sous 2 h
   // Paiement et séjour
   PAYMENT_CONFIRMED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
   PAYMENT_FAILED: { bookingId: string; propertyTitle: string }; // → voyageur
@@ -122,6 +123,14 @@ const RENDERERS: Renderers = {
   OFFER_REJECTED: (p) => ({
     title: 'Négociation terminée',
     body: `La demande pour « ${clip(p.propertyTitle)} » a été refusée : la réservation est annulée.`,
+    linkUrl: bookingLink(p.audience, p.bookingId),
+  }),
+  BOOKING_EXPIRED: (p) => ({
+    title: 'Demande expirée',
+    body:
+      p.audience === 'traveler'
+        ? `Personne n’a répondu dans les 2 heures pour « ${clip(p.propertyTitle)} » : la demande est annulée, vous pouvez en envoyer une autre.`
+        : `Une demande pour « ${clip(p.propertyTitle)} » a expiré faute de réponse dans les 2 heures.`,
     linkUrl: bookingLink(p.audience, p.bookingId),
   }),
   PAYMENT_CONFIRMED: (p) => ({

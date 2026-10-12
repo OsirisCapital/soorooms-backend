@@ -85,6 +85,7 @@ describe('renderNotification', () => {
       OFFER_RECEIVED: { bookingId: 'b', audience: 'host', amount: 1, fromName: 'A' },
       OFFER_ACCEPTED: { bookingId: 'b', audience: 'traveler', amount: 1, propertyTitle: 'P' },
       OFFER_REJECTED: { bookingId: 'b', audience: 'host', propertyTitle: 'P' },
+      BOOKING_EXPIRED: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P' },
       PAYMENT_CONFIRMED: { bookingId: 'b', audience: 'host', amount: 1, propertyTitle: 'P' },
       PAYMENT_FAILED: { bookingId: 'b', propertyTitle: 'P' },
       STAY_CONFIRMATION_REQUESTED: { bookingId: 'b', audience: 'host', otherName: 'A' },

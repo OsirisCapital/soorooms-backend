@@ -21,7 +21,11 @@ function setup(unitCount: number, stays: unknown[]) {
         property: { status: 'ACTIVE', title: 'Villa', collaborators: [] },
       }),
     },
-    booking: { findMany: vi.fn().mockResolvedValue(stays) },
+    booking: {
+      // Les demandes périmées (statut NEGOTIATING) : aucune ; sinon les séjours qui bloquent.
+      findMany: vi.fn().mockImplementation(async (a: { where: { status?: unknown } }) => (a.where.status === 'NEGOTIATING' ? [] : stays)),
+      count: vi.fn().mockResolvedValue(0),
+    },
     user: { findUnique: vi.fn().mockResolvedValue({ fullName: 'Marie' }) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
