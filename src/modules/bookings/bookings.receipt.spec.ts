@@ -10,6 +10,8 @@ function setup(over: Record<string, unknown> = {}) {
     id: '3f9a1c2b-0000-4000-8000-000000000000',
     travelerId: 't1',
     traveler: { fullName: 'Marie Ngo' },
+    guestName: 'Paul Ngo',
+    currency: 'XAF',
     checkInDate: new Date('2027-01-10'),
     checkOutDate: new Date('2027-01-13'),
     room: { name: 'Chambre 1', property: { title: 'Villa Kribi', city: 'Kribi', quarter: 'Mpalla' } },
@@ -33,7 +35,7 @@ describe('reçu voyageur', () => {
 
   it('sépare le prix du séjour et les frais de service', async () => {
     const r = await setup().getReceipt('b', 't1');
-    expect(r).toMatchObject({ reference: 'SR-3F9A1C2B', stayPrice: 30000, travelerFee: 900, totalPaid: 30900, nights: 3, refunded: false });
+    expect(r).toMatchObject({ reference: 'SR-3F9A1C2B', stayPrice: 30000, travelerFee: 900, totalPaid: 30900, nights: 3, refunded: false, guestName: 'Paul Ngo', currency: 'XAF' });
   });
 
   it('refuse un autre utilisateur et une réservation non payée', async () => {

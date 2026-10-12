@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsDateString, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
 
 export class CreateBookingDto {
   @IsUUID()
@@ -20,4 +20,16 @@ export class CreateBookingDto {
   @Min(1)
   @Max(99_999_999)
   proposedPrice?: number;
+
+  // Réservation pour une autre personne : le compte connecté paie, l'occupant est identifié ici.
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  guestName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\+?[0-9 ]{6,20}$/, { message: 'Numéro de téléphone invalide.' })
+  guestPhone?: string;
 }

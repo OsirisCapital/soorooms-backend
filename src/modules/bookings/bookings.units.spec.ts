@@ -52,3 +52,13 @@ describe('BookingsService — disponibilité par unités', () => {
     await expect(service.create('t1', DTO)).rejects.toThrow(/plus disponibles/);
   });
 });
+
+describe('BookingsService — réservation pour une autre personne', () => {
+  it('enregistre l’occupant sans changer le payeur', async () => {
+    const { service, tx } = setup(2, []);
+    await service.create('t1', { ...(DTO as object), guestName: '  Paul Ngo ', guestPhone: '6 70 00 00 00' } as never);
+    expect(tx.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ travelerId: 't1', guestName: 'Paul Ngo', guestPhone: '6 70 00 00 00' }),
+    });
+  });
+});

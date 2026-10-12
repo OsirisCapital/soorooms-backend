@@ -3,6 +3,9 @@ export type Receipt = {
   reference: string;
   issuedAt: Date;
   travelerName: string;
+  /** Occupant, quand il diffère du payeur. */
+  guestName: string | null;
+  currency: string;
   property: { title: string; city: string; quarter: string };
   roomName: string;
   checkInDate: Date;

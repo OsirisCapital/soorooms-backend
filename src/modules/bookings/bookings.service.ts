@@ -82,7 +82,14 @@ export class BookingsService {
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
-        data: { roomId: dto.roomId, travelerId, checkInDate, checkOutDate },
+        data: {
+          roomId: dto.roomId,
+          travelerId,
+          checkInDate,
+          checkOutDate,
+          guestName: dto.guestName?.trim() || null,
+          guestPhone: dto.guestPhone?.replace(/\s+/g, ' ').trim() || null,
+        },
       });
       await tx.priceOffer.create({
         data: { bookingId: created.id, proposedByUserId: travelerId, amount: proposedPrice },
@@ -150,6 +157,8 @@ export class BookingsService {
       reference: receiptReference(booking.id),
       issuedAt: payment.createdAt,
       travelerName: booking.traveler.fullName,
+      guestName: booking.guestName,
+      currency: booking.currency,
       property: { title: booking.room.property.title, city: booking.room.property.city, quarter: booking.room.property.quarter },
       roomName: booking.room.name,
       checkInDate: booking.checkInDate,

@@ -114,6 +114,8 @@ model User {
   // à la création de l'utilisateur.
   passwordHash  String?
   googleId      String?   @unique
+  // Langue préférée (fr, en…) : prévue pour les e-mails et l'interface, pas encore exploitée partout.
+  preferredLanguage String @default("fr")
   role          UserRole  @default(TRAVELER)
   // Niveau dans l'équipe d'administration ; vide pour un utilisateur ordinaire. Un ADMIN sans
   // niveau est traité comme SUPER_ADMIN (compatibilité avec les comptes antérieurs).
@@ -389,6 +391,11 @@ model Booking {
   // unilatéralement).
   totalPrice    Decimal?      @db.Decimal(10, 2)
   status        BookingStatus @default(NEGOTIATING)
+  // Devise des montants de la réservation (XAF aujourd'hui ; prévu pour d'autres pays).
+  currency      String        @default("XAF")
+  // Renseignés quand la personne qui réserve et paie n'est pas celle qui séjournera.
+  guestName     String?
+  guestPhone    String?
   // Double validation post-paiement : le passage à COMPLETED (et donc le
   // déclenchement du reversement à l'hôte) n'a lieu que lorsque les DEUX
   // champs sont renseignés — voir BookingsService.maybeComplete. Ni l'un
