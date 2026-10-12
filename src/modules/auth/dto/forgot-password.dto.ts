@@ -4,6 +4,6 @@ import { normalizePhone } from '../../../common/utils/phone.js';
 
 export class ForgotPasswordDto {
   @Transform(({ value }) => normalizePhone(value))
-  @IsPhoneNumber('CM')
+  @IsPhoneNumber()
   phone!: string;
 }

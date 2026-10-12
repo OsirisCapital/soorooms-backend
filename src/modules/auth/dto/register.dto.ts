@@ -17,7 +17,7 @@ export class RegisterDto {
   fullName!: string;
 
   @Transform(({ value }) => normalizePhone(value))
-  @IsPhoneNumber('CM', { message: 'Numéro de téléphone camerounais invalide.' })
+  @IsPhoneNumber(undefined, { message: 'Numéro de téléphone invalide (indicatif pays requis).' })
   phone!: string;
 
   // Obligatoire : c'est le seul moyen sûr de récupérer un compte dont on a oublié le mot de passe.

@@ -9,7 +9,7 @@ export class InviteCollaboratorDto {
   // place, pour ne jamais assigner un mot de passe ou des droits à
   // l'insu de quelqu'un.
   @Transform(({ value }) => normalizePhone(value))
-  @IsPhoneNumber('CM')
+  @IsPhoneNumber()
   phone!: string;
 
   @IsEnum(CollaboratorRole)

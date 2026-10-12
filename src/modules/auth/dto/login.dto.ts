@@ -4,7 +4,7 @@ import { normalizePhone } from '../../../common/utils/phone.js';
 
 export class LoginDto {
   @Transform(({ value }) => normalizePhone(value))
-  @IsPhoneNumber('CM')
+  @IsPhoneNumber()
   phone!: string;
 
   @IsString()

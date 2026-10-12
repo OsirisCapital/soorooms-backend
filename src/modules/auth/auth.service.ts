@@ -8,6 +8,7 @@
  * suspectée) et de détecter une réutilisation après rotation — un refresh
  * token n'est utilisable qu'une seule fois.
  */
+import { countryForPhone } from '../../common/utils/phone-countries.js';
 import {
   BadRequestException,
   ConflictException,
@@ -97,6 +98,7 @@ export class AuthService {
           data: {
             fullName: dto.fullName,
             phone: dto.phone,
+            countryCode: countryForPhone(dto.phone),
             email: dto.email,
             passwordHash,
             // role: TRAVELER par défaut (voir schema.prisma) — jamais assignable

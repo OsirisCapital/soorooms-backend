@@ -109,6 +109,8 @@ model User {
   // on ne lui envoie aucun lien de réinitialisation et elle ne bloque personne d'autre.
   emailVerifiedAt DateTime?
   phone         String    @unique
+  // Pays du compte (ISO 3166-1 alpha-2), choisi à l'inscription ; déduit de l'indicatif du numéro.
+  countryCode   String?
   // Optionnel : un voyageur inscrit uniquement via Google OAuth n'a jamais
   // de mot de passe. Avec String (non-nullable), cette inscription plantait
   // à la création de l'utilisateur.
