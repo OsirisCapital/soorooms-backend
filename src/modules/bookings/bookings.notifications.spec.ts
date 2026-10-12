@@ -18,7 +18,7 @@ function context(over: Record<string, unknown> = {}) {
     checkOutDate: new Date('2027-01-12'),
     travelerConfirmedAt: null,
     hostConfirmedAt: null,
-    room: { name: 'Chambre', basePrice: 15000, property: { title: 'Villa Kribi', status: 'ACTIVE', collaborators: [{ userId: HOST_A }, { userId: HOST_B }] } },
+    room: { name: 'Chambre', basePrice: 15000, property: { title: 'Villa Kribi', status: 'ACTIVE', collaborators: [{ userId: HOST_A, role: 'MANAGER' }, { userId: HOST_B, role: 'AGENT' }] } },
     offers: [{ id: 'o1', proposedByUserId: TRAVELER, amount: 30000, createdAt: new Date() }],
     ...over,
   };

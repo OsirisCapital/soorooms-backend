@@ -3,6 +3,7 @@
  * chaque hôte (uniquement les logements dont il est MANAGER). Les deux partent des mêmes lignes
  * (séquestre + paiement + versement) et des mêmes calculs (finance.utils.ts).
  */
+import { rolesWith } from '../../common/utils/collaborator-access.js';
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -83,11 +84,11 @@ export class FinanceService {
     };
   }
 
-  /** Un hôte : uniquement les logements dont il est MANAGER. Le net est ce qu'il reçoit, commission déduite. */
+  /** Un hôte : uniquement les logements dont il est gérant principal ou comptable. Le net est ce qu'il reçoit, commission déduite. */
   async hostReport(userId: string, days: number, now = new Date()) {
     const keys = lastDayKeys(days, now);
     const since = windowStart(keys[0]);
-    const rows = await this.loadRows({ booking: { room: { property: { collaborators: { some: { userId, role: 'MANAGER' } } } } } }, since);
+    const rows = await this.loadRows({ booking: { room: { property: { collaborators: { some: { userId, role: { in: rolesWith('finance.view') } } } } } } }, since);
     const report = buildReport(rows, keys, 'net');
     return {
       generatedAt: now.toISOString(),

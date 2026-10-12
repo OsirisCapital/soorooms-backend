@@ -19,6 +19,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../../config/configuration.js';
 import type { PaymentMethod } from '../../prisma/client.js';
+import { userIdsWith } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { computeAmounts } from '../fees/fees.utils.js';
@@ -351,7 +352,7 @@ export class PaymentsService {
       select: {
         id: true,
         travelerId: true,
-        room: { select: { property: { select: { title: true, collaborators: { select: { userId: true } } } } } },
+        room: { select: { property: { select: { title: true, collaborators: { select: { userId: true, role: true } } } } } },
       },
     });
   }
@@ -364,7 +365,7 @@ export class PaymentsService {
       const propertyTitle = booking.room.property.title;
       await this.notifications.notify(booking.travelerId, 'PAYMENT_CONFIRMED', { bookingId, audience: 'traveler', amount, propertyTitle });
       await this.notifications.notifyMany(
-        booking.room.property.collaborators.map((c) => c.userId),
+        userIdsWith(booking.room.property.collaborators, 'bookings.manage'),
         'PAYMENT_CONFIRMED',
         { bookingId, audience: 'host', amount, propertyTitle },
       );

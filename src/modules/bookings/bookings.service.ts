@@ -14,6 +14,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentsService } from '../payments/payments.service.js';
+import { can, userIdsWith } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
@@ -100,7 +101,7 @@ export class BookingsService {
     // Prévient les gestionnaires du logement (jamais bloquant : la réservation est déjà créée).
     const traveler = await this.prisma.user.findUnique({ where: { id: travelerId }, select: { fullName: true } });
     await this.notifications.notifyMany(
-      room.property.collaborators.map((c) => c.userId),
+      userIdsWith(room.property.collaborators, 'bookings.manage'),
       'BOOKING_REQUESTED',
       { bookingId: booking.id, travelerName: traveler?.fullName ?? 'Un voyageur', propertyTitle: room.property.title, amount: Number(proposedPrice) },
     );
@@ -287,7 +288,7 @@ export class BookingsService {
     if (!completed && !booking.travelerConfirmedAt && !booking.hostConfirmedAt) {
       const traveler = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
       await this.notifications.notifyMany(
-        booking.room.property.collaborators.map((c) => c.userId),
+        userIdsWith(booking.room.property.collaborators, 'bookings.manage'),
         'STAY_CONFIRMATION_REQUESTED',
         { bookingId, audience: 'host', otherName: traveler?.fullName ?? 'Le voyageur' },
       );
@@ -297,7 +298,7 @@ export class BookingsService {
 
   async confirmHosting(bookingId: string, userId: string) {
     const booking = await this.loadBookingContext(bookingId);
-    const isCollaborator = booking.room.property.collaborators.some((c) => c.userId === userId);
+    const isCollaborator = booking.room.property.collaborators.some((c) => c.userId === userId && can(c.role, 'bookings.manage'));
     if (!isCollaborator) {
       throw new ForbiddenException("Vous n'êtes pas gestionnaire de ce logement.");
     }
@@ -384,7 +385,7 @@ export class BookingsService {
       await this.notifications.notify(userId, type, payload as never);
     };
     if (booking.travelerId !== actorId) await send(booking.travelerId, 'traveler');
-    for (const collaborator of booking.room.property.collaborators) {
+    for (const collaborator of booking.room.property.collaborators.filter((c) => can(c.role, 'bookings.manage'))) {
       if (collaborator.userId !== actorId) await send(collaborator.userId, 'host');
     }
   }
@@ -420,7 +421,7 @@ export class BookingsService {
     userId: string,
   ) {
     const isTraveler = booking.travelerId === userId;
-    const isCollaborator = booking.room.property.collaborators.some((c) => c.userId === userId);
+    const isCollaborator = booking.room.property.collaborators.some((c) => c.userId === userId && can(c.role, 'bookings.manage'));
     if (!isTraveler && !isCollaborator) {
       throw new ForbiddenException("Vous n'êtes pas partie prenante de cette réservation.");
     }
@@ -460,7 +461,7 @@ export class BookingsService {
       if (closed.count === 0) continue;
       const title = booking.room.property.title;
       await this.notifications.notify(booking.travelerId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'traveler', propertyTitle: title });
-      for (const c of booking.room.property.collaborators) {
+      for (const c of booking.room.property.collaborators.filter((x) => can(x.role, 'bookings.manage'))) {
         await this.notifications.notify(c.userId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'host', propertyTitle: title });
       }
     }

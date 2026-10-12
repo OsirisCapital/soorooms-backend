@@ -140,6 +140,6 @@ describe('MessagesService — lecture', () => {
     const { service, prisma } = make();
     await service.listConversations('trav');
     const where = prisma.booking.findMany.mock.calls[0][0].where;
-    expect(where.OR).toEqual([{ travelerId: 'trav' }, { room: { property: { collaborators: { some: { userId: 'trav' } } } } }]);
+    expect(where.OR).toEqual([{ travelerId: 'trav' }, { room: { property: { collaborators: { some: { userId: 'trav', role: { in: ['MANAGER', 'CO_MANAGER', 'AGENT', 'RECEPTIONIST'] } } } } } }]);
   });
 });

@@ -13,13 +13,14 @@ import {
 } from '@nestjs/common';
 import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/current-user.decorator.js';
 import { RequireCollaboratorRole } from '../../common/decorators/require-collaborator-role.decorator.js';
+import { RequireCapability } from '../../common/decorators/require-capability.decorator.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { PropertyCollaboratorGuard } from '../../common/guards/property-collaborator.guard.js';
 import type { CollaboratorRole, UserRole } from '../../prisma/client.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import { AddPhotoDto } from './dto/add-photo.dto.js';
 import { CreatePropertyDto } from './dto/create-property.dto.js';
-import { InviteCollaboratorDto } from './dto/invite-collaborator.dto.js';
+import { ChangeCollaboratorRoleDto, InviteCollaboratorDto } from './dto/invite-collaborator.dto.js';
 import { UpdateAmenitiesDto } from './dto/update-amenities.dto.js';
 import { UpdatePropertyDto } from './dto/update-property.dto.js';
 import { PropertiesService } from './properties.service.js';
@@ -48,9 +49,10 @@ export class PropertiesController {
   }
 
   @UseGuards(PropertyCollaboratorGuard)
+  @RequireCapability('property.view')
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.propertiesService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.propertiesService.findOne(id, user.id);
   }
 
   @UseGuards(PropertyCollaboratorGuard)
@@ -76,6 +78,20 @@ export class PropertiesController {
 
   @UseGuards(PropertyCollaboratorGuard)
   @RequireCollaboratorRole('MANAGER' as CollaboratorRole)
+  @Get(':id/collaborators')
+  listCollaborators(@Param('id') id: string) {
+    return this.propertiesService.listCollaborators(id);
+  }
+
+  @UseGuards(PropertyCollaboratorGuard)
+  @RequireCollaboratorRole('MANAGER' as CollaboratorRole)
+  @Patch(':id/collaborators/:userId')
+  changeCollaboratorRole(@Param('id') id: string, @Param('userId') userId: string, @Body() dto: ChangeCollaboratorRoleDto) {
+    return this.propertiesService.changeCollaboratorRole(id, userId, dto.role);
+  }
+
+  @UseGuards(PropertyCollaboratorGuard)
+  @RequireCollaboratorRole('MANAGER' as CollaboratorRole)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id/collaborators/:userId')
   async removeCollaborator(@Param('id') id: string, @Param('userId') userId: string) {
@@ -95,6 +111,7 @@ export class PropertiesController {
   // Accessible à tout collaborateur (MANAGER ou AGENT) — voir les
   // demandes de réservation et négociations en cours sur l'établissement.
   @UseGuards(PropertyCollaboratorGuard)
+  @RequireCapability('bookings.manage')
   @Get(':id/bookings')
   listBookings(@Param('id') id: string) {
     return this.bookingsService.findForProperty(id);

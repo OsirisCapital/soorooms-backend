@@ -9,7 +9,7 @@ const TRAVELER = 'traveler-1';
 const DTO = { roomId: 'room-1', checkInDate: '2099-01-10', checkOutDate: '2099-01-12' } as never;
 
 function setup(opts: { openCount?: number; offerAgeMs?: number } = {}) {
-  const property = { title: 'Villa', status: 'ACTIVE', collaborators: [{ userId: HOST }] };
+  const property = { title: 'Villa', status: 'ACTIVE', collaborators: [{ userId: HOST, role: 'MANAGER' }] };
   const booking = {
     id: 'b1',
     roomId: 'room-1',

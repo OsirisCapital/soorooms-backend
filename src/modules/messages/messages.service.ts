@@ -11,6 +11,7 @@
  */
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { can, rolesWith } from '../../common/utils/collaborator-access.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 
 /** Une conversation ne grandit pas sans limite. */
@@ -40,7 +41,7 @@ export class MessagesService {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: participantInclude });
     if (!booking) throw new NotFoundException('Conversation introuvable.');
     const collaborators = booking.room.property.collaborators;
-    const side: Side | null = booking.traveler.id === userId ? 'traveler' : collaborators.some((c) => c.userId === userId) ? 'host' : null;
+    const side: Side | null = booking.traveler.id === userId ? 'traveler' : collaborators.some((c) => c.userId === userId && can(c.role, 'bookings.manage')) ? 'host' : null;
     if (!side) throw new NotFoundException('Conversation introuvable.');
     const manager = collaborators.find((c) => c.role === 'MANAGER') ?? collaborators[0];
     return { booking, side, collaborators, manager };
@@ -55,7 +56,7 @@ export class MessagesService {
     const bookings = await this.prisma.booking.findMany({
       where: {
         messages: { some: {} },
-        OR: [{ travelerId: userId }, { room: { property: { collaborators: { some: { userId } } } } }],
+        OR: [{ travelerId: userId }, { room: { property: { collaborators: { some: { userId, role: { in: rolesWith('bookings.manage') } } } } } }],
       },
       include: {
         ...participantInclude,
@@ -111,7 +112,7 @@ export class MessagesService {
     const bookings = await this.prisma.booking.findMany({
       where: {
         messages: { some: { senderId: { not: userId } } },
-        OR: [{ travelerId: userId }, { room: { property: { collaborators: { some: { userId } } } } }],
+        OR: [{ travelerId: userId }, { room: { property: { collaborators: { some: { userId, role: { in: rolesWith('bookings.manage') } } } } } }],
       },
       select: { id: true, conversationReads: { where: { userId }, select: { lastReadAt: true } } },
       take: 200,
@@ -178,7 +179,7 @@ export class MessagesService {
     // Pas de notification en rafale : un même auteur qui enchaîne les messages n'en déclenche qu'une.
     const burst = previous && previous.senderId === userId && message.sentAt.getTime() - previous.sentAt.getTime() < NOTIFY_QUIET_MS;
     if (!burst) {
-      const recipients = side === 'traveler' ? collaborators.map((c) => c.userId).filter((id) => id !== userId) : [booking.traveler.id];
+      const recipients = side === 'traveler' ? collaborators.filter((c) => can(c.role, 'bookings.manage')).map((c) => c.userId).filter((id) => id !== userId) : [booking.traveler.id];
       await this.notifications.notifyMany(recipients, 'MESSAGE_RECEIVED', { fromName: sender?.fullName ?? 'Quelqu’un', bookingId });
     }
     return { id: message.id, mine: true, author: 'Vous', content: message.content, sentAt: message.sentAt };

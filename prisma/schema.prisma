@@ -104,6 +104,9 @@ enum BoostLevel {
 enum CollaboratorRole {
   MANAGER
   AGENT
+  CO_MANAGER
+  RECEPTIONIST
+  ACCOUNTANT
 }
 
 model User {

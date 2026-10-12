@@ -12,6 +12,8 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import type { CollaboratorRole } from '../../prisma/client.js';
+import { COLLABORATOR_ROLE_LABEL } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import type { AddPhotoDto } from './dto/add-photo.dto.js';
@@ -58,7 +60,7 @@ export class PropertiesService {
     return collaborations.map((c) => ({ ...c.property, myRole: c.role }));
   }
 
-  async findOne(propertyId: string) {
+  async findOne(propertyId: string, userId?: string) {
     const property = await this.prisma.property.findUnique({
       where: { id: propertyId },
       include: { amenities: true, rooms: { include: { photos: { orderBy: { position: 'asc' } } } }, collaborators: true, photos: { orderBy: { position: 'asc' } } },
@@ -66,7 +68,8 @@ export class PropertiesService {
     if (!property) {
       throw new NotFoundException('Logement introuvable.');
     }
-    return property;
+    // Le rôle de la personne qui consulte : l'écran s'adapte (un comptable ne voit pas les chambres à modifier).
+    return { ...property, myRole: property.collaborators.find((c) => c.userId === userId)?.role ?? null };
   }
 
   // ---------------------------------------------------------------------
@@ -134,8 +137,46 @@ export class PropertiesService {
       throw new ConflictException('Cette personne collabore déjà sur ce logement.');
     }
 
-    return this.prisma.propertyCollaborator.create({
+    const created = await this.prisma.propertyCollaborator.create({
       data: { userId: user.id, propertyId, role: dto.role },
+    });
+
+    // La personne est prévenue qu'elle rejoint l'équipe (jamais bloquant).
+    const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { title: true } });
+    await this.notifications?.notify(user.id, 'TEAM_ADDED', {
+      propertyId,
+      propertyTitle: property?.title ?? 'un logement',
+      roleLabel: COLLABORATOR_ROLE_LABEL[dto.role],
+    });
+    return created;
+  }
+
+  /** L'équipe du logement, pour son gérant principal. */
+  async listCollaborators(propertyId: string) {
+    const rows = await this.prisma.propertyCollaborator.findMany({
+      where: { propertyId },
+      include: { user: { select: { fullName: true, phone: true } } },
+    });
+    return rows
+      .map((c) => ({ userId: c.userId, fullName: c.user.fullName, phone: c.user.phone, role: c.role }))
+      .sort((a, b) => Number(b.role === 'MANAGER') - Number(a.role === 'MANAGER') || a.fullName.localeCompare(b.fullName));
+  }
+
+  async changeCollaboratorRole(propertyId: string, targetUserId: string, role: CollaboratorRole) {
+    const target = await this.prisma.propertyCollaborator.findUnique({
+      where: { userId_propertyId: { userId: targetUserId, propertyId } },
+    });
+    if (!target) throw new NotFoundException('Cette personne ne collabore pas sur ce logement.');
+    // Même garde-fou que pour le retrait : jamais de logement sans gérant principal.
+    if (target.role === 'MANAGER' && role !== 'MANAGER') {
+      const managerCount = await this.prisma.propertyCollaborator.count({ where: { propertyId, role: 'MANAGER' } });
+      if (managerCount <= 1) {
+        throw new BadRequestException('Impossible de changer le rôle du dernier gérant principal de ce logement.');
+      }
+    }
+    return this.prisma.propertyCollaborator.update({
+      where: { userId_propertyId: { userId: targetUserId, propertyId } },
+      data: { role },
     });
   }
 

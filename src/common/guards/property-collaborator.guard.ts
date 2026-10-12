@@ -14,6 +14,8 @@ import { Reflector } from '@nestjs/core';
 import { CollaboratorRole } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { COLLABORATOR_ROLE_KEY } from '../decorators/require-collaborator-role.decorator.js';
+import { COLLABORATOR_CAPABILITY_KEY } from '../decorators/require-capability.decorator.js';
+import { can, type Capability } from '../utils/collaborator-access.js';
 
 @Injectable()
 export class PropertyCollaboratorGuard implements CanActivate {
@@ -46,6 +48,14 @@ export class PropertyCollaboratorGuard implements CanActivate {
 
     if (requiredRole && collaboration.role !== requiredRole) {
       throw new ForbiddenException(`Cette action est réservée au rôle ${requiredRole} de ce logement.`);
+    }
+
+    // Sans droit précis déclaré sur la route, il faut pouvoir modifier la fiche (ni réceptionniste ni comptable).
+    const capability =
+      this.reflector.getAllAndOverride<Capability | undefined>(COLLABORATOR_CAPABILITY_KEY, [context.getHandler(), context.getClass()]) ??
+      'property.edit';
+    if (!can(collaboration.role, capability)) {
+      throw new ForbiddenException("Votre rôle sur ce logement ne permet pas cette action.");
     }
 
     // Rendu disponible aux services suivants sans nouvelle requête DB.

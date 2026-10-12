@@ -15,3 +15,8 @@ export class InviteCollaboratorDto {
   @IsEnum(CollaboratorRole)
   role!: CollaboratorRole;
 }
+
+export class ChangeCollaboratorRoleDto {
+  @IsEnum(CollaboratorRole)
+  role!: CollaboratorRole;
+}

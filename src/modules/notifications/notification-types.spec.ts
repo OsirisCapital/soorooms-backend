@@ -110,6 +110,7 @@ describe('renderNotification', () => {
       TASK_DONE: { taskId: 't', title: 'T', byName: 'A' },
       MESSAGE_RECEIVED: { fromName: 'A', bookingId: 'b1' },
       FEES_CHANGED_STAFF: { hostPercent: 5, travelerPercent: 3 },
+      TEAM_ADDED: { propertyId: 'p1', propertyTitle: 'Studio Akwa', roleLabel: 'Réceptionniste' },
       VISIT_PAID: { propertyId: 'p1', propertyTitle: 'Studio Akwa' },
       VISIT_PAID_STAFF: { propertyTitle: 'Studio Akwa' },
       VISIT_ASSIGNED: { visitId: 'v1', propertyTitle: 'Studio Akwa', city: 'Douala' },

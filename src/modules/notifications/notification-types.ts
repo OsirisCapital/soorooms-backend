@@ -40,6 +40,8 @@ export type NotificationPayloads = {
   VISIT_PAID_STAFF: { propertyTitle: string }; // → équipe des visites
   VISIT_ASSIGNED: { visitId: string; propertyTitle: string; city: string }; // → agent
   VISIT_DONE: { propertyId: string; propertyTitle: string; conforming: boolean }; // → gérants
+  // Équipe d'un logement
+  TEAM_ADDED: { propertyId: string; propertyTitle: string; roleLabel: string }; // → la personne ajoutée
   // Support
   SUPPORT_TICKET_NEW: { ticketId: string; number: number; subject: string }; // → équipe
   SUPPORT_USER_REPLY: { ticketId: string; number: number; fromName: string }; // → équipe
@@ -255,6 +257,11 @@ const RENDERERS: Renderers = {
       ? `« ${clip(p.propertyTitle)} » porte désormais le badge « Vérifié par SòôRooms ».`
       : `La visite de « ${clip(p.propertyTitle)} » a relevé des points à corriger. Ouvrez le rapport pour les voir.`,
     linkUrl: `/hote/logements/${encodeURIComponent(p.propertyId)}/verification`,
+  }),
+  TEAM_ADDED: (p) => ({
+    title: 'Vous rejoignez une équipe',
+    body: `Vous avez été ajouté à « ${clip(p.propertyTitle)} » en tant que ${clip(p.roleLabel, 40)}.`,
+    linkUrl: '/hote',
   }),
   SUPPORT_REPLY: (p) => ({
     title: 'Le support vous a répondu',

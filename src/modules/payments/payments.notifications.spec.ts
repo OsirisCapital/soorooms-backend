@@ -15,7 +15,7 @@ function make(opts: { moved?: number; existing?: { id: string; transactionStatus
     booking: {
       findUnique: vi.fn().mockImplementation(async (args: { select?: unknown }) =>
         args?.select
-          ? { id: BOOKING, travelerId: 'traveler-1', room: { property: { title: 'Villa Kribi', collaborators: [{ userId: 'host-a' }] } } }
+          ? { id: BOOKING, travelerId: 'traveler-1', room: { property: { title: 'Villa Kribi', collaborators: [{ userId: 'host-a', role: 'MANAGER' }] } } }
           : { id: BOOKING, travelerId: 'traveler-1', status: 'PENDING_PAYMENT' },
       ),
     },

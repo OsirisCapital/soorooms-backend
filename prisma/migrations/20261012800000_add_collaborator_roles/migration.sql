@@ -1,0 +1,4 @@
+-- AlterEnum
+ALTER TYPE "CollaboratorRole" ADD VALUE 'CO_MANAGER';
+ALTER TYPE "CollaboratorRole" ADD VALUE 'RECEPTIONIST';
+ALTER TYPE "CollaboratorRole" ADD VALUE 'ACCOUNTANT';
