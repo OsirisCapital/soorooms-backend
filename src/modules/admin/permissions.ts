@@ -20,6 +20,8 @@ export const PERMISSIONS = [
   'staff.manage', // créer des membres, attribuer niveaux, accès et tâches
   'audit.view', // journal des actions de l'équipe
   'settings.manage', // pourcentages de commission et frais (super administrateur)
+  'visits.manage', // visites de vérification : voir la file, choisir l'agent
+  'visits.perform', // visites de vérification : réaliser les visites qui nous sont confiées
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -30,6 +32,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
   SUPPORT: ['dashboard.view', 'support.manage', 'users.view'],
   FINANCE: ['dashboard.view', 'disputes.view', 'payments.view', 'payouts.manage'],
   CONTENT: ['dashboard.view', 'announcements.manage', 'releases.manage'],
+  FIELD_AGENT: ['dashboard.view', 'visits.perform'],
 };
 
 export const isPermission = (value: unknown): value is Permission =>

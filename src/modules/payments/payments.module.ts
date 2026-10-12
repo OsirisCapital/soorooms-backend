@@ -6,6 +6,7 @@ import { PaymentsController } from './payments.controller.js';
 import { PaymentsService } from './payments.service.js';
 import { AdminPayoutsController, PayoutDetailsController } from './payouts.controller.js';
 import { PayoutsService } from './payouts.service.js';
+import { VisitPaymentsService } from './visit-payments.service.js';
 
 @Module({
   imports: [FeesModule],
@@ -13,6 +14,7 @@ import { PayoutsService } from './payouts.service.js';
   providers: [
     PaymentsService,
     PayoutsService,
+    VisitPaymentsService,
     // Bascule ici vers une autre implémentation (CinetPay, par exemple)
     // le jour venu — PaymentsService ne dépend que du jeton PAYMENT_GATEWAY,
     // jamais d'une classe concrète.

@@ -1,6 +1,6 @@
 import type { StaffRole } from '../../prisma/client.js';
 
-export const STAFF_ROLES = ['SUPER_ADMIN', 'KYC_REVIEWER', 'SUPPORT', 'FINANCE', 'CONTENT'] as const satisfies readonly StaffRole[];
+export const STAFF_ROLES = ['SUPER_ADMIN', 'KYC_REVIEWER', 'SUPPORT', 'FINANCE', 'CONTENT', 'FIELD_AGENT'] as const satisfies readonly StaffRole[];
 
 export const STAFF_ROLE_LABEL: Record<StaffRole, string> = {
   SUPER_ADMIN: 'Super administrateur',
@@ -8,4 +8,5 @@ export const STAFF_ROLE_LABEL: Record<StaffRole, string> = {
   SUPPORT: 'Support',
   FINANCE: 'Finance',
   CONTENT: 'Contenu',
+  FIELD_AGENT: 'Agent de terrain',
 };

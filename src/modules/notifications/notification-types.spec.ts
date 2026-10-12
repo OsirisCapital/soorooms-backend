@@ -110,6 +110,10 @@ describe('renderNotification', () => {
       TASK_DONE: { taskId: 't', title: 'T', byName: 'A' },
       MESSAGE_RECEIVED: { fromName: 'A', bookingId: 'b1' },
       FEES_CHANGED_STAFF: { hostPercent: 5, travelerPercent: 3 },
+      VISIT_PAID: { propertyId: 'p1', propertyTitle: 'Studio Akwa' },
+      VISIT_PAID_STAFF: { propertyTitle: 'Studio Akwa' },
+      VISIT_ASSIGNED: { visitId: 'v1', propertyTitle: 'Studio Akwa', city: 'Douala' },
+      VISIT_DONE: { propertyId: 'p1', propertyTitle: 'Studio Akwa', conforming: true },
       FEES_CHANGED_HOST: { hostPercent: 5, standardPercent: 10, launchEndsAt: '2027-01-12' },
       ANNOUNCEMENT: { title: 'T', body: 'B' },
     };

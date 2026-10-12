@@ -22,6 +22,7 @@ import { FeesModule } from './modules/fees/fees.module.js';
 import { FinanceModule } from './modules/finance/finance.module.js';
 import { KycModule } from './modules/kyc/kyc.module.js';
 import { UploadsModule } from './modules/uploads/uploads.module.js';
+import { VisitsModule } from './modules/visits/visits.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { PropertiesModule } from './modules/properties/properties.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
@@ -55,6 +56,7 @@ import { MessagesModule } from './modules/messages/messages.module.js';
     PaymentsModule,
     AdminModule,
     FeesModule,
+    VisitsModule,
     FinanceModule,
     FavoritesModule,
     UploadsModule,

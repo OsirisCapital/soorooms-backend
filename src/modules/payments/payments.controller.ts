@@ -7,10 +7,14 @@ import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/cur
 import { Public } from '../../common/decorators/public.decorator.js';
 import { VerifyPaymentDto } from './dto/verify-payment.dto.js';
 import { PaymentsService } from './payments.service.js';
+import { VisitPaymentsService } from './visit-payments.service.js';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly visitPayments: VisitPaymentsService,
+  ) {}
 
   @ApiBearerAuth()
   @Post('bookings/:bookingId/initiate')
@@ -30,6 +34,22 @@ export class PaymentsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.paymentsService.verifyReturn(bookingId, user.id, dto.reference);
+  }
+
+  // Paiement d'une visite de vérification, par le gérant du logement.
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @Post('visits/:taskId/initiate')
+  initiateVisit(@Param('taskId') taskId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.visitPayments.initiate(taskId, user.id);
+  }
+
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('visits/:taskId/verify')
+  verifyVisit(@Param('taskId') taskId: string, @Body() dto: VerifyPaymentDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.visitPayments.verifyReturn(taskId, user.id, dto.reference);
   }
 
   // Appelé par l'agrégateur, jamais par un utilisateur connecté — d'où

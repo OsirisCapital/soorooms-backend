@@ -35,6 +35,11 @@ export type NotificationPayloads = {
   // Logements
   PROPERTY_PUBLISHED: { propertyId: string; propertyTitle: string };
   PROPERTY_SUSPENDED: { propertyId: string; propertyTitle: string };
+  // Visites de vérification
+  VISIT_PAID: { propertyId: string; propertyTitle: string }; // → gérants
+  VISIT_PAID_STAFF: { propertyTitle: string }; // → équipe des visites
+  VISIT_ASSIGNED: { visitId: string; propertyTitle: string; city: string }; // → agent
+  VISIT_DONE: { propertyId: string; propertyTitle: string; conforming: boolean }; // → gérants
   // Support
   SUPPORT_TICKET_NEW: { ticketId: string; number: number; subject: string }; // → équipe
   SUPPORT_USER_REPLY: { ticketId: string; number: number; fromName: string }; // → équipe
@@ -228,6 +233,28 @@ const RENDERERS: Renderers = {
     title: 'Réponse sur une demande',
     body: `${clip(p.fromName)} a répondu à ${ticketRef(p.number)}.`,
     linkUrl: `/admin/support/${p.ticketId}`,
+  }),
+  VISIT_PAID: (p) => ({
+    title: 'Visite de vérification payée ✓',
+    body: `Votre paiement est reçu pour « ${clip(p.propertyTitle)} ». Nous allons confier la visite à un agent.`,
+    linkUrl: `/hote/logements/${encodeURIComponent(p.propertyId)}/verification`,
+  }),
+  VISIT_PAID_STAFF: (p) => ({
+    title: 'Visite à assigner',
+    body: `Une visite de vérification est payée pour « ${clip(p.propertyTitle)} » : choisissez un agent.`,
+    linkUrl: '/admin/visites',
+  }),
+  VISIT_ASSIGNED: (p) => ({
+    title: 'Nouvelle visite à réaliser',
+    body: `Visite de vérification de « ${clip(p.propertyTitle)} » à ${clip(p.city, 40)}.`,
+    linkUrl: `/admin/mes-visites/${encodeURIComponent(p.visitId)}`,
+  }),
+  VISIT_DONE: (p) => ({
+    title: p.conforming ? 'Logement vérifié ✓' : 'Visite terminée : points à corriger',
+    body: p.conforming
+      ? `« ${clip(p.propertyTitle)} » porte désormais le badge « Vérifié par SòôRooms ».`
+      : `La visite de « ${clip(p.propertyTitle)} » a relevé des points à corriger. Ouvrez le rapport pour les voir.`,
+    linkUrl: `/hote/logements/${encodeURIComponent(p.propertyId)}/verification`,
   }),
   SUPPORT_REPLY: (p) => ({
     title: 'Le support vous a répondu',

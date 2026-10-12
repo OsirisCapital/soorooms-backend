@@ -17,7 +17,7 @@ describe('permissionsFor', () => {
     expect(permissionsFor(admin(null))).toEqual([...PERMISSIONS]);
   });
 
-  it.each(['KYC_REVIEWER', 'SUPPORT', 'FINANCE', 'CONTENT'] as const)("le niveau %s n'a pas les accès d'équipe ni le journal", (level) => {
+  it.each(['KYC_REVIEWER', 'SUPPORT', 'FINANCE', 'CONTENT', 'FIELD_AGENT'] as const)("le niveau %s n'a pas les accès d'équipe ni le journal", (level) => {
     const granted = permissionsFor(admin(level));
     expect(granted).not.toContain('staff.manage');
     expect(granted).not.toContain('audit.view');

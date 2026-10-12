@@ -12,6 +12,8 @@ export type FeeSettings = {
   launchHostCommissionPercent: number | null;
   launchEndsAt: Date | null;
   travelerFeePercent: number;
+  /** Prix d'une visite de vérification (FCFA) ; absent = tarif par défaut. */
+  verificationVisitPrice?: number | null;
 };
 
 export type AppliedRates = { hostCommissionPercent: number; travelerFeePercent: number; launchActive: boolean };

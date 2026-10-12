@@ -24,6 +24,7 @@ import { NotificationsService } from '../notifications/notifications.service.js'
 import { computeAmounts } from '../fees/fees.utils.js';
 import { FeesService } from '../fees/fees.service.js';
 import { PayoutsService } from './payouts.service.js';
+import { VisitPaymentsService } from './visit-payments.service.js';
 import {
   PAYMENT_GATEWAY,
   type PaymentCustomer,
@@ -43,6 +44,8 @@ export class PaymentsService {
     @Optional() private readonly payouts?: PayoutsService,
     // Réglages modifiables par le super administrateur ; absents (tests) : pourcentage de l'environnement.
     @Optional() private readonly fees?: FeesService,
+    // Paiement des visites de vérification : une référence peut désigner une visite au lieu d'une réservation.
+    @Optional() private readonly visitPayments?: VisitPaymentsService,
   ) {}
 
   async initiate(bookingId: string, userId: string) {
@@ -109,6 +112,16 @@ export class PaymentsService {
     // client créé…) : on l'acquitte pour que l'agrégateur ne le renvoie pas.
     if (!event) {
       return { ignored: true };
+    }
+
+    // La référence désigne-t-elle une visite de vérification (et non une réservation) ? Les deux sont
+    // des UUID distincts : on regarde d'abord si c'est une visite.
+    if (this.visitPayments) {
+      const visit = await this.prisma.verificationTask.findUnique({
+        where: { id: event.bookingReference },
+        select: { id: true },
+      });
+      if (visit) return this.visitPayments.handleWebhook(event);
     }
 
     // Idempotence : paymentGatewayId est unique en base (voir

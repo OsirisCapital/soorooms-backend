@@ -26,6 +26,7 @@ enum StaffRole {
   SUPPORT
   FINANCE
   CONTENT
+  FIELD_AGENT
 }
 
 enum PropertyType {
@@ -47,8 +48,13 @@ enum VerificationType {
   SURPRISE_FREE
 }
 
+/// Cycle d'une visite de vérification : l'hôte la demande (AWAITING_PAYMENT) et la paie, l'équipe
+/// choisit un agent (PENDING_ASSIGNMENT → ASSIGNED), l'agent rend son rapport :
+/// COMPLETED = logement conforme (badge accordé), REJECTED = non conforme.
 enum VerificationTaskStatus {
+  AWAITING_PAYMENT
   PENDING_ASSIGNMENT
+  ASSIGNED
   COMPLETED
   REJECTED
 }
@@ -540,8 +546,22 @@ model VerificationTask {
   status            VerificationTaskStatus @default(PENDING_ASSIGNMENT)
   inspectionReport  String?
   photosReportUrl   String?
+  // Visite payante demandée par l'hôte : qui, combien (prix figé à la demande), et le paiement.
+  requestedById     String?
+  amount            Decimal?               @db.Decimal(10, 0)
+  paymentGatewayId  String?                @unique
+  paidAt            DateTime?
+  assignedAt        DateTime?
+  visitedAt         DateTime?
+  // Réponses de la grille de contrôle (clé → oui/non) et photos prises sur place.
+  checklist         Json?
+  photoUrls         String[]               @default([])
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
+
+  @@index([status, createdAt])
+  @@index([propertyId])
+  @@index([agentId, status])
 }
 
 // Logements mis de côté par un utilisateur (étoile). Un logement ne peut être
@@ -775,6 +795,8 @@ model PlatformFeeConfig {
   launchHostCommissionPercent Decimal?  @db.Decimal(5, 2)
   launchEndsAt                DateTime?
   travelerFeePercent          Decimal   @db.Decimal(5, 2)
+  // Prix d'une visite de vérification (FCFA) ; vide = tarif par défaut du code.
+  verificationVisitPrice      Decimal?  @db.Decimal(10, 0)
   note                        String?
   createdById                 String?
   createdAt                   DateTime  @default(now())

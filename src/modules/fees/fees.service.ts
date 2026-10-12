@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import type { UpdateFeesDto } from './dto/update-fees.dto.js';
 import { ratesAt, type FeeSettings } from './fees.utils.js';
+import { DEFAULT_VISIT_PRICE } from '../visits/visit.utils.js';
 
 type Row = {
   id: string;
@@ -14,6 +15,7 @@ type Row = {
   launchHostCommissionPercent: { toString(): string } | null;
   launchEndsAt: Date | null;
   travelerFeePercent: { toString(): string };
+  verificationVisitPrice: { toString(): string } | null;
   note: string | null;
   createdById: string | null;
   createdAt: Date;
@@ -25,6 +27,7 @@ const toSettings = (row: Row): FeeSettings => ({
   launchHostCommissionPercent: row.launchHostCommissionPercent == null ? null : num(row.launchHostCommissionPercent),
   launchEndsAt: row.launchEndsAt,
   travelerFeePercent: num(row.travelerFeePercent),
+  verificationVisitPrice: row.verificationVisitPrice == null ? null : num(row.verificationVisitPrice),
 });
 
 @Injectable()
@@ -44,6 +47,12 @@ export class FeesService {
   async currentSettings(): Promise<FeeSettings | null> {
     const row = await this.latest();
     return row ? toSettings(row as Row) : null;
+  }
+
+  /** Prix d'une visite de vérification en vigueur (FCFA). */
+  async visitPrice(): Promise<number> {
+    const settings = await this.currentSettings();
+    return settings?.verificationVisitPrice ?? DEFAULT_VISIT_PRICE;
   }
 
   /** Taux appliqués maintenant : offre de lancement comprise. */
@@ -100,6 +109,8 @@ export class FeesService {
         launchHostCommissionPercent: hasPercent ? dto.launchHostCommissionPercent : null,
         launchEndsAt: hasDate ? dto.launchEndsAt : null,
         travelerFeePercent: dto.travelerFeePercent,
+        // Champ omis : on garde le prix déjà en vigueur (les anciens écrans ne l'envoient pas).
+        verificationVisitPrice: dto.verificationVisitPrice ?? before?.verificationVisitPrice ?? null,
         note: dto.note?.trim() || null,
         createdById: adminId,
       },
@@ -118,6 +129,7 @@ export class FeesService {
             launchHostCommissionPercent: after.launchHostCommissionPercent,
             launchEndsAt: after.launchEndsAt?.toISOString() ?? null,
             travelerFeePercent: after.travelerFeePercent,
+            verificationVisitPrice: after.verificationVisitPrice ?? null,
           },
         },
       })
