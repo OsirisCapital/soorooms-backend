@@ -8,7 +8,7 @@ export const EVENT_SLOT_LABEL: Record<EventSlot, string> = {
   FULL: '24 h (jour et soir)',
 };
 
-export interface EventOptionSnapshot {
+export type EventOptionSnapshot = {
   id: string;
   name: string;
   price: number;
