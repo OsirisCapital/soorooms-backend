@@ -1,6 +1,7 @@
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { PropertyCollaboratorGuard } from '../../common/guards/property-collaborator.guard.js';
+import { AddPhotoDto } from '../properties/dto/add-photo.dto.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 import { UpdateRoomDto } from './dto/update-room.dto.js';
 import { RoomsService } from './rooms.service.js';
@@ -36,5 +37,20 @@ export class RoomsController {
   @Delete(':roomId')
   async remove(@Param('propertyId') propertyId: string, @Param('roomId') roomId: string) {
     await this.roomsService.remove(propertyId, roomId);
+  }
+
+  @Post(':roomId/photos')
+  addPhoto(@Param('propertyId') propertyId: string, @Param('roomId') roomId: string, @Body() dto: AddPhotoDto) {
+    return this.roomsService.addPhoto(propertyId, roomId, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':roomId/photos/:photoId')
+  async removePhoto(
+    @Param('propertyId') propertyId: string,
+    @Param('roomId') roomId: string,
+    @Param('photoId') photoId: string,
+  ) {
+    await this.roomsService.removePhoto(propertyId, roomId, photoId);
   }
 }

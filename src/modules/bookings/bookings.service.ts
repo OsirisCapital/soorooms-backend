@@ -17,6 +17,7 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
@@ -28,7 +29,6 @@ type NotificationSpec = { [K in NotificationType]: [K, NotificationPayloads[K]] 
 // négociation en cours (NEGOTIATING) ne réserve rien tant qu'aucun prix
 // n'est validé, plusieurs voyageurs peuvent donc négocier en parallèle sur
 // les mêmes dates ; seule la première à aboutir les verrouille.
-const BLOCKING_STATUSES = ['PENDING_PAYMENT', 'CONFIRMED_ESCROW', 'COMPLETED'] as const;
 
 @Injectable()
 export class BookingsService {
@@ -65,7 +65,7 @@ export class BookingsService {
       throw new ForbiddenException('Vous ne pouvez pas réserver un logement que vous gérez.');
     }
 
-    await this.assertNoOverlap(dto.roomId, checkInDate, checkOutDate);
+    await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate);
 
     const proposedPrice = dto.proposedPrice ?? this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate);
 
@@ -157,7 +157,7 @@ export class BookingsService {
       // déjà prises. Sans ce verrou, la vérification de chevauchement et la
       // mise à jour étaient deux étapes séparées — double réservation possible.
       await tx.$queryRaw`SELECT id FROM "Room" WHERE id = ${booking.roomId} FOR UPDATE`;
-      await this.assertNoOverlap(booking.roomId, booking.checkInDate, booking.checkOutDate, booking.id, tx);
+      await this.assertUnitAvailable(booking.roomId, booking.checkInDate, booking.checkOutDate, booking.id, tx);
 
       // Garde atomique : l'offre doit toujours être celle en attente (une
       // contre-offre a pu arriver entre-temps) et la négociation ouverte.
@@ -368,14 +368,19 @@ export class BookingsService {
     }
   }
 
-  private async assertNoOverlap(
+  /**
+   * Vérifie qu'il reste au moins une unité du type de chambre sur toutes les nuits du séjour.
+   * Un type à 1 unité garde exactement l'ancien comportement (pas de chevauchement).
+   */
+  private async assertUnitAvailable(
     roomId: string,
     checkInDate: Date,
     checkOutDate: Date,
     excludeBookingId?: string,
-    db: Pick<PrismaService, 'booking'> = this.prisma,
+    db: Pick<PrismaService, 'booking' | 'room'> = this.prisma,
   ) {
-    const overlapping = await db.booking.findFirst({
+    const room = await db.room.findUnique({ where: { id: roomId }, select: { unitCount: true } });
+    const stays = await db.booking.findMany({
       where: {
         roomId,
         id: excludeBookingId ? { not: excludeBookingId } : undefined,
@@ -383,8 +388,9 @@ export class BookingsService {
         checkInDate: { lt: checkOutDate },
         checkOutDate: { gt: checkInDate },
       },
+      select: { checkInDate: true, checkOutDate: true },
     });
-    if (overlapping) {
+    if (unitsLeft(room?.unitCount ?? 1, stays, checkInDate, checkOutDate) < 1) {
       throw new ConflictException('Ces dates ne sont plus disponibles pour cette chambre.');
     }
   }

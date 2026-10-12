@@ -340,11 +340,27 @@ model Room {
   // bedroomCount vaut naturellement 1.
   bedCount      Int            @default(1)
   bedroomCount  Int            @default(1)
+  // Nombre d'unités identiques de ce type (20 chambres "Standard" = 1 Room, unitCount 20).
+  // Disponibles = unitCount - réservations qui se chevauchent (voir rooms/availability.utils.ts).
+  unitCount     Int            @default(1)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
   availabilities Availability[]
   bookings       Booking[]
+  photos         RoomPhoto[]
+}
+
+/// Photo d'un type de chambre. Au moins une par type est exigée pour publier le logement.
+model RoomPhoto {
+  id        String   @id @default(uuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  url       String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([roomId, position])
 }
 
 model Availability {

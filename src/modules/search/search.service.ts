@@ -5,12 +5,10 @@
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
 import type { SearchRoomsQueryDto } from './dto/search-rooms.query.dto.js';
 
-// Mêmes statuts qu'utilisés dans BookingsService pour verrouiller le
-// calendrier — une négociation en cours (NEGOTIATING) ne rend pas une
-// chambre indisponible pour les autres recherches.
-const BLOCKING_STATUSES = ['PENDING_PAYMENT', 'CONFIRMED_ESCROW', 'COMPLETED'] as const;
+// Mêmes statuts que BookingsService pour verrouiller le calendrier (voir availability.utils).
 
 @Injectable()
 export class SearchService {
@@ -48,42 +46,81 @@ export class SearchService {
     if (query.maxGuests !== undefined) {
       roomWhere.maxGuests = { gte: query.maxGuests };
     }
-    // Disponibilité réelle : on exclut toute chambre ayant déjà une
-    // réservation qui bloque le calendrier (payée ou en cours) et qui
-    // chevauche les dates demandées — sans ce filtre, un voyageur pourrait
-    // négocier sur une chambre déjà prise pour ses dates.
-    if (query.checkInDate && query.checkOutDate) {
-      const checkIn = new Date(query.checkInDate);
-      const checkOut = new Date(query.checkOutDate);
-      roomWhere.bookings = {
-        none: {
-          status: { in: [...BLOCKING_STATUSES] },
-          checkInDate: { lt: checkOut },
-          checkOutDate: { gt: checkIn },
-        },
-      };
+    const roomInclude = {
+      property: { include: { amenities: true, photos: { orderBy: { position: 'asc' as const } } } },
+      photos: { orderBy: { position: 'asc' as const } },
+    };
+
+    // Sans dates : pas de calcul de disponibilité, on affiche le total d'unités.
+    if (!(query.checkInDate && query.checkOutDate)) {
+      const [rooms, total] = await Promise.all([
+        this.prisma.room.findMany({
+          where: roomWhere,
+          include: roomInclude,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy: { basePrice: 'asc' },
+        }),
+        this.prisma.room.count({ where: roomWhere }),
+      ]);
+      const results = rooms.map((r) => ({ ...r, unitsLeft: r.unitCount }));
+      return { results, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) };
     }
 
-    const [results, total] = await Promise.all([
-      this.prisma.room.findMany({
-        where: roomWhere,
-        include: {
-          property: { include: { amenities: true, photos: { orderBy: { position: 'asc' } } } },
+    // Avec dates : un type est proposé tant qu'il lui reste au moins une unité libre sur
+    // toutes les nuits du séjour. Le calcul se fait en mémoire, puis on pagine.
+    const checkIn = new Date(query.checkInDate);
+    const checkOut = new Date(query.checkOutDate);
+    const candidates = await this.prisma.room.findMany({
+      where: roomWhere,
+      include: {
+        ...roomInclude,
+        bookings: {
+          where: {
+            status: { in: [...BLOCKING_STATUSES] },
+            checkInDate: { lt: checkOut },
+            checkOutDate: { gt: checkIn },
+          },
+          select: { checkInDate: true, checkOutDate: true },
         },
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: { basePrice: 'asc' },
-      }),
-      this.prisma.room.count({ where: roomWhere }),
-    ]);
-
+      },
+      orderBy: { basePrice: 'asc' },
+    });
+    const available = candidates
+      .map(({ bookings, ...room }) => ({
+        ...room,
+        unitsLeft: unitsLeft(room.unitCount, bookings, checkIn, checkOut),
+      }))
+      .filter((r) => r.unitsLeft > 0);
+    const results = available.slice((page - 1) * limit, page * limit);
+    const total = available.length;
     return { results, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) };
   }
 
-  async findActiveProperty(propertyId: string) {
+  async findActiveProperty(propertyId: string, checkInDate?: string, checkOutDate?: string) {
+    const checkIn = checkInDate && checkOutDate ? new Date(checkInDate) : null;
+    const checkOut = checkInDate && checkOutDate ? new Date(checkOutDate) : null;
     const property = await this.prisma.property.findUnique({
       where: { id: propertyId },
-      include: { amenities: true, rooms: true, photos: { orderBy: { position: 'asc' } } },
+      include: {
+        amenities: true,
+        photos: { orderBy: { position: 'asc' } },
+        rooms: {
+          include: {
+            photos: { orderBy: { position: 'asc' } },
+            // Sans dates, on regarde les séjours à venir ; avec dates, ceux qui les chevauchent.
+            bookings: {
+              where: {
+                status: { in: [...BLOCKING_STATUSES] },
+                ...(checkIn && checkOut
+                  ? { checkInDate: { lt: checkOut }, checkOutDate: { gt: checkIn } }
+                  : { checkOutDate: { gt: new Date() } }),
+              },
+              select: { checkInDate: true, checkOutDate: true },
+            },
+          },
+        },
+      },
     });
     // Message volontairement identique, que le logement n'existe pas ou
     // qu'il ne soit simplement pas encore publié — on ne révèle pas
@@ -91,6 +128,19 @@ export class SearchService {
     if (!property || property.status !== 'ACTIVE') {
       throw new NotFoundException('Logement introuvable.');
     }
-    return property;
+    const rooms = property.rooms.map(({ bookings, ...room }) => ({
+      ...room,
+      // Sans dates, unitsLeft = unités libres aujourd'hui (sinon sur la période demandée).
+      unitsLeft: checkIn && checkOut
+        ? unitsLeft(room.unitCount, bookings, checkIn, checkOut)
+        : unitsLeft(room.unitCount, bookings, startOfToday(), new Date(startOfToday().getTime() + 24 * 3_600_000)),
+    }));
+    return { ...property, rooms };
   }
+}
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
 }

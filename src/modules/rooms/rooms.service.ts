@@ -8,24 +8,48 @@
  */
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import type { AddPhotoDto } from '../properties/dto/add-photo.dto.js';
+import { BLOCKING_STATUSES, peakOccupancy } from './availability.utils.js';
 import type { CreateRoomDto } from './dto/create-room.dto.js';
 import type { UpdateRoomDto } from './dto/update-room.dto.js';
+
+const WITH_PHOTOS = { photos: { orderBy: { position: 'asc' as const } } };
 
 @Injectable()
 export class RoomsService {
   constructor(private readonly prisma: PrismaService) {}
 
   list(propertyId: string) {
-    return this.prisma.room.findMany({ where: { propertyId } });
+    return this.prisma.room.findMany({ where: { propertyId }, include: WITH_PHOTOS });
   }
 
   create(propertyId: string, dto: CreateRoomDto) {
-    return this.prisma.room.create({ data: { propertyId, ...dto } });
+    return this.prisma.room.create({ data: { propertyId, ...dto }, include: WITH_PHOTOS });
   }
 
   async update(propertyId: string, roomId: string, dto: UpdateRoomDto) {
     await this.assertRoomBelongsToProperty(propertyId, roomId);
-    return this.prisma.room.update({ where: { id: roomId }, data: dto });
+    if (dto.unitCount !== undefined) await this.assertEnoughUnitsForBookings(roomId, dto.unitCount);
+    return this.prisma.room.update({ where: { id: roomId }, data: dto, include: WITH_PHOTOS });
+  }
+
+  /** Baisser le nombre d'unités sous ce que les réservations à venir occupent déjà créerait des doubles réservations. */
+  private async assertEnoughUnitsForBookings(roomId: string, unitCount: number) {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const upcoming = await this.prisma.booking.findMany({
+      where: { roomId, status: { in: [...BLOCKING_STATUSES] }, checkOutDate: { gt: today } },
+      select: { checkInDate: true, checkOutDate: true },
+    });
+    if (upcoming.length === 0) return;
+    const from = new Date(Math.min(...upcoming.map((b) => b.checkInDate.getTime())));
+    const to = new Date(Math.max(...upcoming.map((b) => b.checkOutDate.getTime())));
+    const peak = peakOccupancy(upcoming, from, to);
+    if (unitCount < peak) {
+      throw new ConflictException(
+        `Impossible de descendre à ${unitCount} unité${unitCount > 1 ? 's' : ''} : jusqu'à ${peak} réservations à venir se chevauchent déjà sur ce type de chambre.`,
+      );
+    }
   }
 
   async remove(propertyId: string, roomId: string) {
@@ -40,6 +64,27 @@ export class RoomsService {
       );
     }
     await this.prisma.room.delete({ where: { id: roomId } });
+  }
+
+  // --- Photos de la chambre ---------------------------------------------
+
+  async addPhoto(propertyId: string, roomId: string, dto: AddPhotoDto) {
+    await this.assertRoomBelongsToProperty(propertyId, roomId);
+    let position = dto.position;
+    if (position === undefined) {
+      const last = await this.prisma.roomPhoto.findFirst({ where: { roomId }, orderBy: { position: 'desc' } });
+      position = (last?.position ?? -1) + 1;
+    }
+    return this.prisma.roomPhoto.create({ data: { roomId, url: dto.url, position } });
+  }
+
+  async removePhoto(propertyId: string, roomId: string, photoId: string) {
+    await this.assertRoomBelongsToProperty(propertyId, roomId);
+    const photo = await this.prisma.roomPhoto.findUnique({ where: { id: photoId } });
+    if (!photo || photo.roomId !== roomId) {
+      throw new NotFoundException("Cette photo n'appartient pas à cette chambre.");
+    }
+    await this.prisma.roomPhoto.delete({ where: { id: photoId } });
   }
 
   private async assertRoomBelongsToProperty(propertyId: string, roomId: string) {

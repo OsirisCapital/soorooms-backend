@@ -30,4 +30,12 @@ export class CreateRoomDto {
   @IsInt()
   @Min(1)
   bedroomCount?: number;
+
+  // Nombre de chambres identiques de ce type (par défaut 1). Un hôtel qui a 20 chambres
+  // « Standard » crée UN type avec 20 unités plutôt que 20 fiches.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  unitCount?: number;
 }

@@ -53,7 +53,7 @@ export class PropertiesService {
   async listMine(userId: string) {
     const collaborations = await this.prisma.propertyCollaborator.findMany({
       where: { userId },
-      include: { property: { include: { amenities: true, rooms: true, photos: true } } },
+      include: { property: { include: { amenities: true, rooms: { include: { photos: { orderBy: { position: 'asc' } } } }, photos: true } } },
     });
     return collaborations.map((c) => ({ ...c.property, myRole: c.role }));
   }
@@ -61,7 +61,7 @@ export class PropertiesService {
   async findOne(propertyId: string) {
     const property = await this.prisma.property.findUnique({
       where: { id: propertyId },
-      include: { amenities: true, rooms: true, collaborators: true, photos: { orderBy: { position: 'asc' } } },
+      include: { amenities: true, rooms: { include: { photos: { orderBy: { position: 'asc' } } } }, collaborators: true, photos: { orderBy: { position: 'asc' } } },
     });
     if (!property) {
       throw new NotFoundException('Logement introuvable.');
@@ -194,7 +194,10 @@ export class PropertiesService {
 
     const property = await this.prisma.property.findUnique({
       where: { id: propertyId },
-      include: { _count: { select: { rooms: true } } },
+      include: {
+        _count: { select: { rooms: true } },
+        rooms: { select: { name: true, _count: { select: { photos: true } } } },
+      },
     });
     if (!property) {
       throw new NotFoundException('Logement introuvable.');
@@ -206,11 +209,16 @@ export class PropertiesService {
     if (property._count.rooms === 0) {
       throw new BadRequestException('Ajoutez au moins une chambre avant de publier ce logement.');
     }
+    // Chaque type de chambre doit montrer au moins une photo : une annonce sans image ne se réserve pas.
+    const withoutPhoto = (property.rooms ?? []).filter((r) => r._count.photos === 0).map((r) => r.name);
+    if (withoutPhoto.length > 0) {
+      throw new BadRequestException(`Ajoutez au moins une photo à : ${withoutPhoto.join(', ')}.`);
+    }
 
     const published = await this.prisma.property.update({
       where: { id: propertyId },
       data: { status: 'ACTIVE' },
-      include: { amenities: true, rooms: true, photos: { orderBy: { position: 'asc' } } },
+      include: { amenities: true, rooms: { include: { photos: { orderBy: { position: 'asc' } } } }, photos: { orderBy: { position: 'asc' } } },
     });
     // Une seule alerte : pas de nouvelle notification si le logement était déjà publié.
     if (property.status !== 'ACTIVE') {

@@ -15,7 +15,7 @@ function setup(overrides: Overrides = {}) {
     property: {
       findUnique: vi
         .fn()
-        .mockResolvedValue(overrides.property === undefined ? { id: PROPERTY_ID, status: 'DRAFT', _count: { rooms: 1 } } : overrides.property),
+        .mockResolvedValue(overrides.property === undefined ? { id: PROPERTY_ID, status: 'DRAFT', _count: { rooms: 1 }, rooms: [{ name: 'Studio', _count: { photos: 1 } }] } : overrides.property),
       update: vi.fn().mockResolvedValue({ id: PROPERTY_ID, status: 'ACTIVE' }),
     },
   };
@@ -61,8 +61,11 @@ describe('PropertiesService.publish', () => {
   });
 
   it('conserve les autres règles : logement suspendu, sans chambre, introuvable', async () => {
-    await expect(setup({ property: { id: PROPERTY_ID, status: 'SUSPENDED', _count: { rooms: 1 } } }).service.publish(PROPERTY_ID, 'u1')).rejects.toThrow(/suspendu/);
-    await expect(setup({ property: { id: PROPERTY_ID, status: 'DRAFT', _count: { rooms: 0 } } }).service.publish(PROPERTY_ID, 'u1')).rejects.toThrow(/au moins une chambre/);
+    await expect(setup({ property: { id: PROPERTY_ID, status: 'SUSPENDED', _count: { rooms: 1 }, rooms: [] } }).service.publish(PROPERTY_ID, 'u1')).rejects.toThrow(/suspendu/);
+    await expect(setup({ property: { id: PROPERTY_ID, status: 'DRAFT', _count: { rooms: 0 }, rooms: [] } }).service.publish(PROPERTY_ID, 'u1')).rejects.toThrow(/au moins une chambre/);
+    await expect(
+      setup({ property: { id: PROPERTY_ID, status: 'DRAFT', _count: { rooms: 2 }, rooms: [{ name: 'Studio', _count: { photos: 2 } }, { name: 'Chambre VIP', _count: { photos: 0 } }] } }).service.publish(PROPERTY_ID, 'u1'),
+    ).rejects.toThrow(/au moins une photo à : Chambre VIP/);
     await expect(setup({ property: null }).service.publish(PROPERTY_ID, 'u1')).rejects.toThrow(/introuvable/);
   });
 });

@@ -27,17 +27,19 @@ function context(over: Record<string, unknown> = {}) {
 function make(booking = context(), opts: { releasedCount?: number; later?: Record<string, unknown> } = {}) {
   const tx = {
     $queryRaw: vi.fn(),
-    booking: { findFirst: vi.fn().mockResolvedValue(null), updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn().mockResolvedValue({ id: 'b1' }) },
+    booking: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn().mockResolvedValue({ id: 'b1' }) },
+    room: { findUnique: vi.fn().mockResolvedValue({ unitCount: 1 }) },
     priceOffer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn() },
   };
   const prisma = {
     booking: {
       findUnique: vi.fn().mockImplementation(async () => booking),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: opts.releasedCount ?? 1 }),
     },
-    room: { findUnique: vi.fn().mockResolvedValue({ id: 'room-1', basePrice: 15000, property: booking.room.property }) },
+    room: { findUnique: vi.fn().mockResolvedValue({ id: 'room-1', basePrice: 15000, unitCount: 1, property: booking.room.property }) },
     user: { findUnique: vi.fn().mockResolvedValue({ fullName: 'Marie Ngo' }) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };

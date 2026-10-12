@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { SearchRoomsQueryDto } from './dto/search-rooms.query.dto.js';
+import { PropertyAvailabilityQueryDto } from './dto/property-availability.query.dto.js';
 import { SearchService } from './search.service.js';
 
 // Entièrement public — un voyageur n'a pas besoin de compte pour chercher
@@ -16,7 +17,7 @@ export class SearchController {
   }
 
   @Get('properties/:id')
-  findActiveProperty(@Param('id') id: string) {
-    return this.searchService.findActiveProperty(id);
+  findActiveProperty(@Param('id') id: string, @Query() query: PropertyAvailabilityQueryDto) {
+    return this.searchService.findActiveProperty(id, query.checkInDate, query.checkOutDate);
   }
 }

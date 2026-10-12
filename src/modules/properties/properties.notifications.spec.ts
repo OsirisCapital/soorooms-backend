@@ -7,7 +7,7 @@ function make(status: 'PENDING_KYC' | 'ACTIVE' | 'SUSPENDED' = 'PENDING_KYC') {
   const prisma = {
     user: { findUnique: vi.fn().mockResolvedValue({ id: 'host-1', emailVerifiedAt: new Date(), kycStatus: 'APPROVED' }) },
     property: {
-      findUnique: vi.fn().mockResolvedValue({ id: 'p1', title: 'Villa Kribi', status, _count: { rooms: 2 } }),
+      findUnique: vi.fn().mockResolvedValue({ id: 'p1', title: 'Villa Kribi', status, _count: { rooms: 2 }, rooms: [{ name: 'A', _count: { photos: 1 } }] }),
       update: vi.fn().mockResolvedValue({ id: 'p1', status: 'ACTIVE' }),
     },
   };
