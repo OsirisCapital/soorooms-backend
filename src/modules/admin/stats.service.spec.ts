@@ -26,7 +26,7 @@ describe('StatsService.overview', () => {
     expect(result.users.total).toBe(0);
     expect(result.bookings.total).toBe(0);
     expect(result.bookings.byStatus).toEqual({
-      NEGOTIATING: 0, PENDING_PAYMENT: 0, CONFIRMED_ESCROW: 0, COMPLETED: 0, DISPUTED: 0, CANCELLED: 0,
+      NEGOTIATING: 0, PENDING_PAYMENT: 0, DEPOSIT_PAID: 0, CONFIRMED_ESCROW: 0, COMPLETED: 0, DISPUTED: 0, CANCELLED: 0,
     });
     expect(result.properties.byStatus).toEqual({ PENDING_KYC: 0, ACTIVE: 0, SUSPENDED: 0 });
     expect(result.money).toEqual({ volumeBooked: 0, heldInEscrow: 0, platformFeesEarned: 0 });

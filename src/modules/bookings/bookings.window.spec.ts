@@ -26,6 +26,7 @@ function setup(opts: { openCount?: number; offerAgeMs?: number } = {}) {
     booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), create: vi.fn().mockResolvedValue({ id: 'b1' }) },
   };
   const prisma = {
+    escrowVault: { findUnique: vi.fn().mockResolvedValue(null) },
     room: { findUnique: vi.fn().mockResolvedValue({ id: 'room-1', basePrice: 1000, unitCount: 1, property }) },
     booking: {
       findUnique: vi.fn().mockResolvedValue(booking),

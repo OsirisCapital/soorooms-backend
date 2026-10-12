@@ -31,6 +31,19 @@ export class CreateRoomDto {
   @Min(1)
   bedroomCount?: number;
 
+  // Résidence étudiante : forfaits au semestre et à l'année (null = non proposé).
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(1)
+  @Max(99_999_999)
+  semesterPrice?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(1)
+  @Max(99_999_999)
+  yearPrice?: number | null;
+
   // Nombre de chambres identiques de ce type (par défaut 1). Un hôtel qui a 20 chambres
   // « Standard » crée UN type avec 20 unités plutôt que 20 fiches.
   @IsOptional()

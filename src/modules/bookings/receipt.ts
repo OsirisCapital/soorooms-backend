@@ -17,6 +17,11 @@ export type Receipt = {
   totalPaid: number;
   paymentMethod: string;
   refunded: boolean;
+  /** Résidence étudiante : forfait réservé (SEMESTER ou YEAR), null pour un séjour classique. */
+  stayTerm: string | null;
+  /** Paiement en deux temps (salle de fêtes) : ce qu'il reste à payer (0 si tout est réglé) et son échéance. */
+  balanceDue: number;
+  balanceDueAt: Date | null;
   /** Facture entreprise, une fois demandée par le voyageur ; sinon null (simple reçu). */
   invoice: { number: string; company: string; address: string; taxId: string | null; issuedAt: Date } | null;
 };

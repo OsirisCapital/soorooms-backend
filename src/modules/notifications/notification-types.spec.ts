@@ -91,6 +91,7 @@ describe('renderNotification', () => {
       BOOKING_EXPIRED: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P' },
       PAYMENT_CONFIRMED: { bookingId: 'b', audience: 'host', amount: 1, propertyTitle: 'P' },
       PAYMENT_FAILED: { bookingId: 'b', propertyTitle: 'P' },
+      BALANCE_FORFEITED: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P', amount: 1 },
       STAY_CONFIRMATION_REQUESTED: { bookingId: 'b', audience: 'host', otherName: 'A' },
       BOOKING_COMPLETED: { bookingId: 'b', propertyTitle: 'P' },
       PAYOUT_QUEUED: { bookingId: 'b', amount: 1, propertyTitle: 'P', needsDetails: true },

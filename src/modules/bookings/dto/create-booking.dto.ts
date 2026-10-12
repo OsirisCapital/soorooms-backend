@@ -1,5 +1,6 @@
 import { ArrayMaxSize, IsArray, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
 import { EVENT_SLOTS, type EventSlot } from '../event.utils.js';
+import { STAY_TERMS, type StayTerm } from '../stay-term.utils.js';
 
 export class CreateBookingDto {
   @IsUUID()
@@ -35,6 +36,11 @@ export class CreateBookingDto {
   @IsString()
   @Matches(/^\+?[0-9 ]{6,20}$/, { message: 'Numéro de téléphone invalide.' })
   guestPhone?: string;
+
+  // Résidence étudiante : forfait réservé (la date de sortie en découle).
+  @IsOptional()
+  @IsIn(STAY_TERMS)
+  stayTerm?: StayTerm;
 
   // Salle de fêtes uniquement.
   @IsOptional()

@@ -87,7 +87,7 @@ describe('NotificationEmailService.sendFor', () => {
       KYC_APPROVED: {}, KYC_REJECTED: { reason: 'x' }, BOOKING_REQUESTED: { bookingId: 'b', travelerName: 'T', propertyTitle: 'P' },
       OFFER_RECEIVED: { bookingId: 'b', audience: 'host', amount: 1, fromName: 'F' }, OFFER_ACCEPTED: { bookingId: 'b', audience: 'host', amount: 1, propertyTitle: 'P' },
       OFFER_REJECTED: { bookingId: 'b', audience: 'host', propertyTitle: 'P' }, PAYMENT_CONFIRMED: { bookingId: 'b', audience: 'host', amount: 1, propertyTitle: 'P' },
-      PAYMENT_FAILED: { bookingId: 'b', propertyTitle: 'P' }, STAY_CONFIRMATION_REQUESTED: { bookingId: 'b', audience: 'host', otherName: 'O' },
+      PAYMENT_FAILED: { bookingId: 'b', propertyTitle: 'P' }, BALANCE_FORFEITED: { bookingId: 'b', audience: 'host', propertyTitle: 'P', amount: 1 }, STAY_CONFIRMATION_REQUESTED: { bookingId: 'b', audience: 'host', otherName: 'O' },
       BOOKING_COMPLETED: { bookingId: 'b', propertyTitle: 'P' }, PAYOUT_RELEASED: { bookingId: 'b', amount: 1, propertyTitle: 'P' },
       DISPUTE_OPENED: { bookingId: 'b', audience: 'host' }, PROPERTY_PUBLISHED: { propertyId: 'p', propertyTitle: 'P' },
       PROPERTY_SUSPENDED: { propertyId: 'p', propertyTitle: 'P' }, SUPPORT_REPLY: { ticketId: 't', number: 1 },

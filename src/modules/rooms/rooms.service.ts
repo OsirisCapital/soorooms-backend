@@ -6,7 +6,7 @@
  * devinant son UUID (PropertyCollaboratorGuard vérifie l'accès à
  * l'établissement, pas l'appartenance de la chambre elle-même).
  */
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { AddPhotoDto } from '../properties/dto/add-photo.dto.js';
 import { BLOCKING_STATUSES, peakOccupancy } from './availability.utils.js';
@@ -23,12 +23,28 @@ export class RoomsService {
     return this.prisma.room.findMany({ where: { propertyId }, include: WITH_PHOTOS });
   }
 
-  create(propertyId: string, dto: CreateRoomDto) {
+  async create(propertyId: string, dto: CreateRoomDto) {
+    await this.assertForfaitsForResidence(propertyId, dto);
     return this.prisma.room.create({ data: { propertyId, ...dto }, include: WITH_PHOTOS });
+  }
+
+  /** Une résidence étudiante se loue au forfait : au moins le semestre ou l'année doit avoir un prix. */
+  private async assertForfaitsForResidence(propertyId: string, dto: { semesterPrice?: number | null; yearPrice?: number | null }, existing?: { semesterPrice: unknown; yearPrice: unknown }) {
+    const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { propertyType: true } });
+    if (property?.propertyType !== 'STUDENT_RESIDENCE') return;
+    const semester = dto.semesterPrice !== undefined ? dto.semesterPrice : (existing?.semesterPrice ?? null);
+    const year = dto.yearPrice !== undefined ? dto.yearPrice : (existing?.yearPrice ?? null);
+    if (semester == null && year == null) {
+      throw new BadRequestException('Indiquez le prix du semestre et/ou de l\'année.');
+    }
   }
 
   async update(propertyId: string, roomId: string, dto: UpdateRoomDto) {
     await this.assertRoomBelongsToProperty(propertyId, roomId);
+    if (dto.semesterPrice !== undefined || dto.yearPrice !== undefined) {
+      const current = await this.prisma.room.findUnique({ where: { id: roomId }, select: { semesterPrice: true, yearPrice: true } });
+      await this.assertForfaitsForResidence(propertyId, dto, current ?? undefined);
+    }
     if (dto.unitCount !== undefined) await this.assertEnoughUnitsForBookings(roomId, dto.unitCount);
     return this.prisma.room.update({ where: { id: roomId }, data: dto, include: WITH_PHOTOS });
   }

@@ -5,7 +5,7 @@
  * sur ses nuits (arrivée incluse, départ exclu). Pour un séjour donné, il reste de la place si, sur
  * CHAQUE nuit du séjour, au moins une unité est libre : on prend donc la nuit la plus chargée.
  */
-export const BLOCKING_STATUSES = ['PENDING_PAYMENT', 'CONFIRMED_ESCROW', 'COMPLETED'] as const;
+export const BLOCKING_STATUSES = ['PENDING_PAYMENT', 'DEPOSIT_PAID', 'CONFIRMED_ESCROW', 'COMPLETED'] as const;
 
 export type Stay = { checkInDate: Date; checkOutDate: Date };
 

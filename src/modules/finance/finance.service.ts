@@ -3,6 +3,7 @@
  * chaque hôte (uniquement les logements dont il est MANAGER). Les deux partent des mêmes lignes
  * (séquestre + paiement + versement) et des mêmes calculs (finance.utils.ts).
  */
+import { forfeitedAmounts } from '../payments/deposit.utils.js';
 import { rolesWith } from '../../common/utils/collaborator-access.js';
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../prisma/client.js';
@@ -38,6 +39,8 @@ export class FinanceService {
       const payment = escrow.transactions[0];
       if (!payment) return [];
       const property = escrow.booking.room.property;
+      // Seul l'acompte est payé : on ne compte que sa part (au prorata de la commission).
+      const partial = escrow.booking.status === 'DEPOSIT_PAID' && escrow.depositAmount != null ? forfeitedAmounts(escrow) : null;
       const closedAt = escrow.status === 'HELD_IN_ESCROW' ? null : escrow.status === 'RELEASED_TO_HOST' ? (escrow.payout?.paidAt ?? escrow.updatedAt) : escrow.updatedAt;
       return [
         {
@@ -52,9 +55,9 @@ export class FinanceService {
           status: escrow.status,
           bookingStatus: escrow.booking.status,
           method: payment.paymentMethod,
-          amount: toNumber(escrow.amountHeld),
-          fee: toNumber(escrow.platformFee),
-          net: toNumber(escrow.hostPayout),
+          amount: partial ? partial.amountHeld : toNumber(escrow.amountHeld),
+          fee: partial ? partial.platformFee : toNumber(escrow.platformFee),
+          net: partial ? partial.hostPayout : toNumber(escrow.hostPayout),
           payoutStatus: escrow.payout?.status ?? null,
         },
       ];

@@ -24,6 +24,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { computeAmounts } from '../fees/fees.utils.js';
 import { FeesService } from '../fees/fees.service.js';
+import { balanceDeadline, nextStage, planPayment, type PaymentStage } from './deposit.utils.js';
 import { PayoutsService } from './payouts.service.js';
 import { VisitPaymentsService } from './visit-payments.service.js';
 import {
@@ -60,7 +61,7 @@ export class PaymentsService {
     if (booking.travelerId !== userId) {
       throw new ForbiddenException('Seul le voyageur de cette réservation peut initier le paiement.');
     }
-    if (booking.status !== 'PENDING_PAYMENT') {
+    if (booking.status !== 'PENDING_PAYMENT' && booking.status !== 'DEPOSIT_PAID') {
       throw new ConflictException("Cette réservation n'est pas en attente de paiement.");
     }
     if (booking.totalPrice == null) {
@@ -68,25 +69,30 @@ export class PaymentsService {
     }
 
     const totalPrice = Number(booking.totalPrice);
-    const escrow = await this.getOrCreateEscrow(booking.id, totalPrice);
+    const escrow = await this.getOrCreateEscrow(booking, totalPrice);
+    // Somme attendue maintenant : paiement unique, acompte, ou solde.
+    const stage = nextStage(booking, escrow);
+    if (!stage) {
+      throw new ConflictException("Cette réservation n'attend aucun paiement.");
+    }
 
     const customer = this.buildCustomer(booking.traveler);
     const frontendUrl = this.configService.get('frontendUrl', { infer: true });
 
     const { paymentUrl, gatewayRef } = await this.gateway.initiatePayment({
       // Ce que le voyageur paie vraiment : prix du séjour + frais voyageur (figés sur le séquestre).
-      amount: Number(escrow.amountHeld),
+      amount: stage.amount,
       currency: 'XAF',
       // Référence neuve à chaque tentative : l'agrégateur exige une référence
       // unique par paiement, et un voyageur dont le premier essai a échoué doit
       // pouvoir réessayer. L'id de la réservation en est extrait au retour du webhook.
       reference: `${booking.id}_${Date.now().toString(36)}`,
-      description: `Réservation — ${booking.room.name}`,
+      description: `Réservation — ${booking.room.name}${stage.kind === 'DEPOSIT' ? ' (acompte)' : stage.kind === 'BALANCE' ? ' (solde)' : ''}`,
       customer,
       callbackUrl: `${frontendUrl}/profil/reservations/${booking.id}`,
     });
 
-    return { escrowId: escrow.id, paymentUrl, gatewayRef };
+    return { escrowId: escrow.id, paymentUrl, gatewayRef, stage: stage.kind, amount: stage.amount };
   }
 
   /**
@@ -153,6 +159,12 @@ export class PaymentsService {
     // interroge directement l'agrégateur et c'est SA réponse qui fait foi
     // (statut, montant, devise). Si la vérification échoue ou n'est pas encore
     // concluante, on répond par une erreur : l'agrégateur renverra la notification.
+    // Quelle somme attend-on ? Paiement unique, acompte ou solde, selon l'état de la réservation.
+    const bookingNow = await this.prisma.booking.findUnique({ where: { id: escrow.bookingId }, select: { status: true } });
+    const stage: PaymentStage = bookingNow ? nextStage(bookingNow, escrow) : null;
+    const expectedAmount = stage?.amount ?? Number(escrow.amountHeld);
+    const kind = stage?.kind ?? 'FULL';
+
     let amount = event.amount;
     if (event.status === 'SUCCESS') {
       const verified = await this.gateway.verifyPayment(event.gatewayRef);
@@ -171,18 +183,19 @@ export class PaymentsService {
 
     // Un paiement « réussi » d'un montant différent de celui attendu ne doit
     // jamais confirmer la réservation (paiement partiel, montant altéré).
-    if (event.status === 'SUCCESS' && Math.round(amount) !== Math.round(Number(escrow.amountHeld))) {
+    if (event.status === 'SUCCESS' && Math.round(amount) !== Math.round(expectedAmount)) {
       this.logger.error(
-        `Webhook ${event.gatewayRef} : montant reçu ${amount} ≠ montant attendu ${String(escrow.amountHeld)} (réservation ${escrow.bookingId}). Vérification manuelle requise.`,
+        `Webhook ${event.gatewayRef} : montant reçu ${amount} ≠ montant attendu ${String(expectedAmount)} (réservation ${escrow.bookingId}). Vérification manuelle requise.`,
       );
       throw new BadRequestException('Montant du paiement différent du montant attendu.');
     }
     // Les événements d'échec ne portent pas toujours un montant exploitable.
-    const recordedAmount = Number.isFinite(amount) && amount > 0 ? amount : Number(escrow.amountHeld);
+    const recordedAmount = Number.isFinite(amount) && amount > 0 ? amount : expectedAmount;
 
     await this.applyPayment({
       escrow,
       existing,
+      kind,
       gatewayRef: event.gatewayRef,
       status: event.status,
       amount: recordedAmount,
@@ -216,7 +229,7 @@ export class PaymentsService {
     if (['CONFIRMED_ESCROW', 'COMPLETED', 'DISPUTED'].includes(booking.status)) {
       return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: booking.status };
     }
-    if (booking.status !== 'PENDING_PAYMENT') {
+    if (booking.status !== 'PENDING_PAYMENT' && booking.status !== 'DEPOSIT_PAID') {
       throw new ConflictException("Cette réservation n'est pas en attente de paiement.");
     }
 
@@ -241,6 +254,14 @@ export class PaymentsService {
 
     const existing = await this.prisma.transaction.findUnique({ where: { paymentGatewayId: verified.gatewayRef } });
     const payload = { source: 'return-verification', transaction: verified.raw };
+    // L'acompte est déjà enregistré et la réservation a avancé (webhook arrivé avant le retour du voyageur) : rien à refaire.
+    // Un succès enregistré dont la réservation n'a pas avancé reste, lui, rejoué plus bas (rattrapage).
+    if (existing?.transactionStatus === 'SUCCESS' && booking.status === 'DEPOSIT_PAID' && (existing as { kind?: string }).kind === 'DEPOSIT') {
+      return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: booking.status };
+    }
+    const stage = nextStage(booking, escrow);
+    const expectedAmount = stage?.amount ?? Number(escrow.amountHeld);
+    const kind = stage?.kind ?? 'FULL';
 
     if (verified.status === 'FAILED') {
       // Ne jamais rétrograder un paiement déjà confirmé.
@@ -248,9 +269,10 @@ export class PaymentsService {
         await this.applyPayment({
           escrow,
           existing,
+          kind,
           gatewayRef: verified.gatewayRef,
           status: 'FAILED',
-          amount: Number.isFinite(verified.amount) && verified.amount > 0 ? verified.amount : Number(escrow.amountHeld),
+          amount: Number.isFinite(verified.amount) && verified.amount > 0 ? verified.amount : expectedAmount,
           paymentMethod: verified.paymentMethod,
           payload,
         });
@@ -262,9 +284,9 @@ export class PaymentsService {
       this.logger.error(`Vérification au retour ${verified.gatewayRef} : devise ${verified.currency || 'absente'} au lieu de XAF.`);
       throw new BadRequestException('Devise du paiement inattendue.');
     }
-    if (Math.round(verified.amount) !== Math.round(Number(escrow.amountHeld))) {
+    if (Math.round(verified.amount) !== Math.round(expectedAmount)) {
       this.logger.error(
-        `Vérification au retour ${verified.gatewayRef} : montant ${verified.amount} ≠ montant attendu ${String(escrow.amountHeld)} (réservation ${booking.id}). Vérification manuelle requise.`,
+        `Vérification au retour ${verified.gatewayRef} : montant ${verified.amount} ≠ montant attendu ${String(expectedAmount)} (réservation ${booking.id}). Vérification manuelle requise.`,
       );
       throw new BadRequestException('Montant du paiement différent du montant attendu.');
     }
@@ -272,6 +294,7 @@ export class PaymentsService {
     await this.applyPayment({
       escrow,
       existing,
+      kind,
       gatewayRef: verified.gatewayRef,
       status: 'SUCCESS',
       amount: verified.amount,
@@ -280,7 +303,7 @@ export class PaymentsService {
     });
 
     const after = await this.prisma.booking.findUnique({ where: { id: booking.id } });
-    return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: after?.status ?? 'CONFIRMED_ESCROW' };
+    return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: after?.status ?? (kind === 'DEPOSIT' ? 'DEPOSIT_PAID' : 'CONFIRMED_ESCROW') };
   }
 
   /**
@@ -291,19 +314,20 @@ export class PaymentsService {
   private async applyPayment(params: {
     escrow: { id: string; bookingId: string };
     existing: { id: string; transactionStatus?: string } | null;
+    kind: 'FULL' | 'DEPOSIT' | 'BALANCE';
     gatewayRef: string;
     status: 'SUCCESS' | 'FAILED' | 'PENDING';
     amount: number;
     paymentMethod: PaymentMethod;
     payload: unknown;
   }) {
-    const { escrow, existing, gatewayRef, status, amount, paymentMethod, payload } = params;
+    const { escrow, existing, kind, gatewayRef, status, amount, paymentMethod, payload } = params;
 
     const confirmedNow = await this.prisma.$transaction(async (tx) => {
       if (existing) {
         await tx.transaction.update({
           where: { id: existing.id },
-          data: { transactionStatus: status, amount, rawWebhookPayload: payload as never },
+          data: { transactionStatus: status, amount, kind, rawWebhookPayload: payload as never },
         });
       } else {
         await tx.transaction.create({
@@ -312,6 +336,7 @@ export class PaymentsService {
             paymentGatewayId: gatewayRef,
             paymentMethod,
             amount,
+            kind,
             transactionStatus: status,
             rawWebhookPayload: payload as never,
           },
@@ -323,13 +348,23 @@ export class PaymentsService {
         // (EscrowVault reste HELD_IN_ESCROW). Seule la réservation avance, et
         // uniquement depuis PENDING_PAYMENT : un événement tardif ne doit pas
         // ressusciter une réservation annulée, en litige ou terminée.
-        const moved = await tx.booking.updateMany({
-          where: { id: escrow.bookingId, status: 'PENDING_PAYMENT' },
-          data: { status: 'CONFIRMED_ESCROW' },
-        });
+        let moved: { count: number };
+        if (kind === 'DEPOSIT') {
+          // Acompte : la date est bloquée, le solde est dû avant l'événement.
+          const dates = await tx.booking.findUnique({ where: { id: escrow.bookingId }, select: { checkInDate: true } });
+          moved = await tx.booking.updateMany({
+            where: { id: escrow.bookingId, status: 'PENDING_PAYMENT' },
+            data: { status: 'DEPOSIT_PAID', balanceDueAt: dates ? balanceDeadline(dates.checkInDate, new Date()) : null },
+          });
+        } else {
+          moved = await tx.booking.updateMany({
+            where: { id: escrow.bookingId, status: kind === 'BALANCE' ? 'DEPOSIT_PAID' : 'PENDING_PAYMENT' },
+            data: { status: 'CONFIRMED_ESCROW' },
+          });
+        }
         if (moved.count === 0) {
           this.logger.error(
-            `Paiement SUCCESS reçu pour la réservation ${escrow.bookingId} qui n'est plus PENDING_PAYMENT : remboursement manuel à prévoir.`,
+            `Paiement SUCCESS (${kind}) reçu pour la réservation ${escrow.bookingId} qui n'attend plus ce paiement : remboursement manuel à prévoir.`,
           );
         }
         return moved.count > 0;
@@ -413,7 +448,8 @@ export class PaymentsService {
     return { name: traveler.fullName, phone, email };
   }
 
-  private async getOrCreateEscrow(bookingId: string, totalPrice: number) {
+  private async getOrCreateEscrow(booking: { id: string; checkInDate: Date; depositPercent?: number | null }, totalPrice: number) {
+    const bookingId = booking.id;
     const existing = await this.prisma.escrowVault.findUnique({ where: { bookingId } });
     if (existing) {
       return existing;
@@ -426,6 +462,8 @@ export class PaymentsService {
         travelerFeePercent: 0,
       };
     const amounts = computeAmounts(totalPrice, rates);
+    // Salle de fêtes : paiement en deux temps si l'événement est assez loin (plan figé sur le séquestre).
+    const plan = planPayment({ checkInDate: booking.checkInDate, now: new Date(), depositPercent: booking.depositPercent, amountHeld: amounts.amountHeld });
 
     return this.prisma.escrowVault.create({
       data: {
@@ -436,6 +474,7 @@ export class PaymentsService {
         hostCommissionPercent: rates.hostCommissionPercent,
         travelerFeePercent: rates.travelerFeePercent,
         travelerFee: amounts.travelerFee,
+        depositAmount: plan?.depositAmount ?? null,
       },
     });
   }

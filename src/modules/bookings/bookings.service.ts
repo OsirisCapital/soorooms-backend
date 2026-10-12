@@ -19,6 +19,8 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { forfeitedAmounts, HALL_DEPOSIT_PERCENT, nextStage } from '../payments/deposit.utils.js';
+import { termEndDate, termPrice } from './stay-term.utils.js';
 import { eventDefaultPrice, guestsError, type EventOptionSnapshot, type EventSlot } from './event.utils.js';
 import { countNights, invoiceNumber, receiptReference, type Receipt } from './receipt.js';
 import { isExpired, MAX_OPEN_REQUESTS, RESPONSE_WINDOW_MS } from './request-window.js';
@@ -68,8 +70,20 @@ export class BookingsService {
 
     // Salle de fêtes : un événement = une date (le lendemain sert de borne de fin) + créneau, invités, options.
     const isHall = room.property.propertyType === 'EVENT_HALL';
-    const checkOutDate = isHall ? new Date(checkInDate.getTime() + 24 * 3_600_000) : new Date(dto.checkOutDate ?? '');
-    if (!isHall && (!dto.checkOutDate || checkOutDate <= checkInDate)) {
+    // Résidence étudiante : forfait semestre/année à partir de la date d'entrée.
+    const isResidence = room.property.propertyType === 'STUDENT_RESIDENCE';
+    let termAmount: number | null = null;
+    if (isResidence) {
+      if (!dto.stayTerm) throw new BadRequestException('Choisissez le forfait : semestre ou année.');
+      termAmount = termPrice(room, dto.stayTerm);
+      if (termAmount == null) throw new BadRequestException("Ce forfait n'est pas proposé pour cette chambre.");
+    }
+    const checkOutDate = isHall
+      ? new Date(checkInDate.getTime() + 24 * 3_600_000)
+      : isResidence && dto.stayTerm
+        ? termEndDate(checkInDate, dto.stayTerm)
+        : new Date(dto.checkOutDate ?? '');
+    if (!isHall && !isResidence && (!dto.checkOutDate || checkOutDate <= checkInDate)) {
       throw new BadRequestException("La date de départ doit être postérieure à la date d'arrivée.");
     }
     let eventData: { eventType: string; eventSlot: EventSlot; eventGuests: number; eventOptions: EventOptionSnapshot[] } | null = null;
@@ -106,7 +120,11 @@ export class BookingsService {
 
     const proposedPrice =
       dto.proposedPrice ??
-      (isHall ? eventDefaultPrice(room.basePrice, chosenOptions) : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate));
+      (isHall
+        ? eventDefaultPrice(room.basePrice, chosenOptions)
+        : termAmount != null
+          ? termAmount
+          : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate));
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
@@ -118,6 +136,9 @@ export class BookingsService {
           guestName: dto.guestName?.trim() || null,
           guestPhone: dto.guestPhone?.replace(/\s+/g, ' ').trim() || null,
           ...(eventData ?? {}),
+          ...(isResidence ? { stayTerm: dto.stayTerm } : {}),
+          // Salle de fêtes : paiement en deux temps (acompte puis solde), si l'événement est assez loin.
+          ...(isHall ? { depositPercent: HALL_DEPOSIT_PERCENT } : {}),
         },
       });
       await tx.priceOffer.create({
@@ -159,7 +180,9 @@ export class BookingsService {
     await this.expireStale({ bookingId });
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
-    return booking;
+    // Prochain paiement attendu (paiement unique, acompte ou solde) — sans exposer le détail du séquestre.
+    const escrow = await this.prisma.escrowVault.findUnique({ where: { bookingId }, select: { amountHeld: true, depositAmount: true } });
+    return { ...booking, nextPayment: escrow ? nextStage(booking, escrow) : null };
   }
 
   /** Reçu du voyageur : disponible dès qu'un paiement a abouti. */
@@ -169,7 +192,7 @@ export class BookingsService {
       include: {
         traveler: { select: { fullName: true } },
         room: { include: { property: true } },
-        escrowVault: { include: { transactions: { where: { transactionStatus: 'SUCCESS' }, orderBy: { createdAt: 'asc' }, take: 1 } } },
+        escrowVault: { include: { transactions: { where: { transactionStatus: 'SUCCESS' }, orderBy: { createdAt: 'asc' } } } },
       },
     });
     if (!booking || booking.travelerId !== userId) {
@@ -180,7 +203,11 @@ export class BookingsService {
     if (!escrow || !payment) {
       throw new ConflictException('Le reçu est disponible une fois le paiement effectué.');
     }
-    const totalPaid = Number(payment.amount);
+    // Plusieurs paiements possibles (acompte puis solde) : on additionne ce qui est réellement encaissé.
+    const totalPaid = escrow.transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const twoStep = escrow.depositAmount != null;
+    const fullPrice = Number(escrow.amountHeld);
+    const balanceDue = twoStep ? Math.max(0, fullPrice - totalPaid) : 0;
     const travelerFee = Number(escrow.travelerFee);
     return {
       reference: receiptReference(booking.id),
@@ -193,12 +220,15 @@ export class BookingsService {
       checkInDate: booking.checkInDate,
       checkOutDate: booking.checkOutDate,
       nights: countNights(booking.checkInDate, booking.checkOutDate),
-      stayPrice: totalPaid - travelerFee,
+      stayPrice: (twoStep ? fullPrice : totalPaid) - travelerFee,
       travelerFee,
       travelerFeePercent: escrow.travelerFeePercent === null ? null : Number(escrow.travelerFeePercent),
       totalPaid,
       paymentMethod: payment.paymentMethod,
       refunded: escrow.status === 'REFUNDED_TO_TRAVELER',
+      stayTerm: booking.stayTerm ?? null,
+      balanceDue,
+      balanceDueAt: balanceDue > 0 ? booking.balanceDueAt : null,
       invoice:
         booking.invoiceIssuedAt && booking.invoiceCompany && booking.invoiceAddress
           ? {
@@ -220,6 +250,9 @@ export class BookingsService {
     const receipt = await this.getReceipt(bookingId, userId); // vérifie voyageur + paiement effectué
     if (receipt.invoice) {
       throw new ConflictException('La facture de cette réservation est déjà émise.');
+    }
+    if (receipt.balanceDue > 0) {
+      throw new ConflictException('La facture sera disponible une fois le solde payé.');
     }
     const issued = await this.prisma.booking.updateMany({
       where: { id: bookingId, travelerId: userId, invoiceIssuedAt: null },
@@ -503,6 +536,7 @@ export class BookingsService {
    * à chaque lecture ou action concernée) et prévient les deux parties.
    */
   private async expireStale(scope: { travelerId?: string; propertyId?: string; bookingId?: string }) {
+    await this.forfeitUnpaidBalances(scope);
     const cutoff = new Date(Date.now() - RESPONSE_WINDOW_MS);
     const stale = await this.prisma.booking.findMany({
       where: {
@@ -525,6 +559,48 @@ export class BookingsService {
       await this.notifications.notify(booking.travelerId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'traveler', propertyTitle: title });
       for (const c of booking.room.property.collaborators.filter((x) => can(x.role, 'bookings.manage'))) {
         await this.notifications.notify(c.userId, 'BOOKING_EXPIRED', { bookingId: booking.id, audience: 'host', propertyTitle: title });
+      }
+    }
+  }
+
+  /**
+   * Salle de fêtes : solde non payé à l'échéance → la réservation est annulée et l'acompte reste à l'hôte
+   * (règle acceptée au départ). Comme pour les demandes expirées, pas de tâche planifiée : on traite à la
+   * lecture ou à l'action concernée. L'acompte entre dans la file « À verser » de la finance.
+   */
+  private async forfeitUnpaidBalances(scope: { travelerId?: string; propertyId?: string; bookingId?: string }) {
+    const overdue = await this.prisma.booking.findMany({
+      where: {
+        status: 'DEPOSIT_PAID',
+        balanceDueAt: { lte: new Date() },
+        ...(scope.travelerId ? { travelerId: scope.travelerId } : {}),
+        ...(scope.propertyId ? { room: { propertyId: scope.propertyId } } : {}),
+        ...(scope.bookingId ? { id: scope.bookingId } : {}),
+      },
+      include: { escrowVault: true, room: { include: { property: { include: { collaborators: true } } } } },
+      take: 50,
+    });
+    for (const booking of overdue) {
+      const escrow = booking.escrowVault;
+      if (!escrow || escrow.depositAmount == null) continue;
+      const amounts = forfeitedAmounts(escrow);
+      const closed = await this.prisma.$transaction(async (tx) => {
+        const res = await tx.booking.updateMany({ where: { id: booking.id, status: 'DEPOSIT_PAID' }, data: { status: 'CANCELLED' } });
+        if (res.count === 0) return false; // le solde vient d'être payé : rien à faire
+        await tx.escrowVault.update({ where: { id: escrow.id }, data: amounts });
+        return true;
+      });
+      if (!closed) continue;
+      try {
+        await this.paymentsService.releaseEscrow(booking.id);
+      } catch {
+        // La mise en file pourra être refaite : l'acompte reste HELD_IN_ESCROW en attendant.
+      }
+      const title = booking.room.property.title;
+      const amount = amounts.amountHeld;
+      await this.notifications.notify(booking.travelerId, 'BALANCE_FORFEITED', { bookingId: booking.id, audience: 'traveler', propertyTitle: title, amount });
+      for (const c of booking.room.property.collaborators.filter((x) => can(x.role, 'bookings.manage'))) {
+        await this.notifications.notify(c.userId, 'BALANCE_FORFEITED', { bookingId: booking.id, audience: 'host', propertyTitle: title, amount });
       }
     }
   }

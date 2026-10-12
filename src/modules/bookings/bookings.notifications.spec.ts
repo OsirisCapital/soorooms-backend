@@ -33,6 +33,7 @@ function make(booking = context(), opts: { releasedCount?: number; later?: Recor
     priceOffer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn() },
   };
   const prisma = {
+    escrowVault: { findUnique: vi.fn().mockResolvedValue(null) },
     booking: {
       findUnique: vi.fn().mockImplementation(async () => booking),
       findFirst: vi.fn().mockResolvedValue(null),

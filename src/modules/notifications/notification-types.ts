@@ -24,6 +24,7 @@ export type NotificationPayloads = {
   // Paiement et séjour
   PAYMENT_CONFIRMED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
   PAYMENT_FAILED: { bookingId: string; propertyTitle: string }; // → voyageur
+  BALANCE_FORFEITED: { bookingId: string; audience: Audience; propertyTitle: string; amount: number }; // solde non payé à l'échéance : l'acompte reste à l'hôte
   STAY_CONFIRMATION_REQUESTED: { bookingId: string; audience: Audience; otherName: string };
   BOOKING_COMPLETED: { bookingId: string; propertyTitle: string }; // → voyageur
   PAYOUT_QUEUED: { bookingId: string; amount: number; propertyTitle: string; needsDetails: boolean }; // → hôte
@@ -164,6 +165,14 @@ const RENDERERS: Renderers = {
       p.audience === 'traveler'
         ? `Votre paiement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » est confirmé. Les fonds sont gardés en sécurité jusqu'à votre séjour.`
         : `Le voyageur a payé ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} ». Les fonds sont sécurisés : vous pouvez l'accueillir.`,
+    linkUrl: bookingLink(p.audience, p.bookingId),
+  }),
+  BALANCE_FORFEITED: (p) => ({
+    title: p.audience === 'traveler' ? 'Réservation annulée : solde non payé' : 'Solde non payé : acompte conservé',
+    body:
+      p.audience === 'traveler'
+        ? `Le solde de « ${clip(p.propertyTitle)} » n'a pas été payé à l'échéance : la réservation est annulée et l'acompte de ${fcfa(p.amount)} reste à l'hôte.`
+        : `Le solde de « ${clip(p.propertyTitle)} » n'a pas été payé à l'échéance : la réservation est annulée. L'acompte de ${fcfa(p.amount)} vous sera versé.`,
     linkUrl: bookingLink(p.audience, p.bookingId),
   }),
   PAYMENT_FAILED: (p) => ({

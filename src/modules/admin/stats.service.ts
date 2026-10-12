@@ -44,6 +44,7 @@ export class StatsService {
       volume,
       escrowHeld,
       feesEarned,
+      partialHeld,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({ where: { role: 'TRAVELER' } }),
@@ -58,6 +59,8 @@ export class StatsService {
       this.prisma.booking.aggregate({ _sum: { totalPrice: true }, where: { status: { in: PAID_STATUSES } } }),
       this.prisma.escrowVault.aggregate({ _sum: { amountHeld: true }, where: { status: 'HELD_IN_ESCROW' } }),
       this.prisma.escrowVault.aggregate({ _sum: { platformFee: true }, where: { status: 'RELEASED_TO_HOST' } }),
+      // Salles de fêtes : tant que seul l'acompte est payé, seul l'acompte est réellement détenu.
+      this.prisma.escrowVault.aggregate({ _sum: { amountHeld: true, depositAmount: true }, where: { status: 'HELD_IN_ESCROW', booking: { status: 'DEPOSIT_PAID' } } }),
     ]);
 
     const byBookingStatus = countsByStatus(Object.values(BookingStatus), bookingsByStatus);
@@ -79,7 +82,7 @@ export class StatsService {
       },
       money: {
         volumeBooked: toNumber(volume._sum.totalPrice),
-        heldInEscrow: toNumber(escrowHeld._sum.amountHeld),
+        heldInEscrow: toNumber(escrowHeld._sum.amountHeld) - (toNumber(partialHeld?._sum?.amountHeld) - toNumber(partialHeld?._sum?.depositAmount)),
         platformFeesEarned: toNumber(feesEarned._sum.platformFee),
       },
     };

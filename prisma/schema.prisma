@@ -35,6 +35,7 @@ enum PropertyType {
   STUDENT_ROOM
   GUEST_HOUSE
   EVENT_HALL
+  STUDENT_RESIDENCE
 }
 
 enum PropertyStatus {
@@ -63,6 +64,7 @@ enum VerificationTaskStatus {
 enum BookingStatus {
   NEGOTIATING
   PENDING_PAYMENT
+  DEPOSIT_PAID
   CONFIRMED_ESCROW
   COMPLETED
   DISPUTED
@@ -358,6 +360,9 @@ model Room {
   // Nombre d'unités identiques de ce type (20 chambres "Standard" = 1 Room, unitCount 20).
   // Disponibles = unitCount - réservations qui se chevauchent (voir rooms/availability.utils.ts).
   unitCount     Int            @default(1)
+  // Résidence étudiante : forfaits (FCFA) au semestre et à l'année ; null = forfait non proposé.
+  semesterPrice Decimal?       @db.Decimal(10, 2)
+  yearPrice     Decimal?       @db.Decimal(10, 2)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -419,6 +424,11 @@ model Booking {
   eventSlot     String?
   eventGuests   Int?
   eventOptions  Json?
+  // Paiement en deux temps (salles de fêtes) : % d'acompte voulu, et échéance du solde fixée une fois l'acompte payé.
+  // Résidence étudiante : forfait réservé (SEMESTER ou YEAR) ; la date de sortie en découle.
+  stayTerm       String?
+  depositPercent Int?
+  balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
   // Le nom du signataire est copié au moment de la signature : il ne change pas si le profil change.
   attestationCode       String?   @unique
@@ -478,6 +488,8 @@ model EscrowVault {
   hostCommissionPercent Decimal? @db.Decimal(5, 2)
   travelerFeePercent    Decimal? @db.Decimal(5, 2)
   travelerFee           Decimal  @default(0) @db.Decimal(10, 2)
+  // Acompte (FCFA) quand le paiement se fait en deux temps ; null = paiement unique.
+  depositAmount         Decimal? @db.Decimal(10, 2)
   status        EscrowStatus @default(HELD_IN_ESCROW)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -525,6 +537,8 @@ model Transaction {
   paymentMethod   PaymentMethod
   amount          Decimal           @db.Decimal(10, 2)
   transactionStatus TransactionStatus @default(PENDING)
+  // FULL (paiement unique), DEPOSIT (acompte) ou BALANCE (solde).
+  kind            String            @default("FULL")
   // Trace complète du webhook reçu — indispensable pour déboguer un
   // désaccord sur ce que l'agrégateur a réellement envoyé, sans avoir à
   // le leur redemander.
