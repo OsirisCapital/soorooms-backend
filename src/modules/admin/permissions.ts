@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   'releases.manage', // publication des mises à jour de l'application
   'staff.manage', // créer des membres, attribuer niveaux, accès et tâches
   'audit.view', // journal des actions de l'équipe
+  'settings.manage', // pourcentages de commission et frais (super administrateur)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

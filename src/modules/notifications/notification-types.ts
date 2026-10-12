@@ -42,6 +42,8 @@ export type NotificationPayloads = {
   TASK_DONE: { taskId: string; title: string; byName: string }; // → créateur
   // Autres
   MESSAGE_RECEIVED: { fromName: string; bookingId?: string };
+  FEES_CHANGED_STAFF: { hostPercent: number; travelerPercent: number }; // → équipe réglages
+  FEES_CHANGED_HOST: { hostPercent: number; standardPercent: number; launchEndsAt?: string }; // → hôtes
   ANNOUNCEMENT: { title: string; body: string; href?: string };
 };
 
@@ -60,6 +62,11 @@ export function clip(text: string, max = MAX_FREE_TEXT): string {
 /** 15000 → « 15 000 FCFA » (espace ordinaire : s'affiche pareil partout). */
 export function fcfa(amount: number): string {
   return `${String(Math.round(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
+}
+
+/** 5 → « 5 % », 2.5 → « 2,5 % ». */
+export function pct(value: number): string {
+  return `${String(value).replace('.', ',')} %`;
 }
 
 /** Numéro lisible donné à l'utilisateur : 42 → « SR-0042 ». */
@@ -226,6 +233,18 @@ const RENDERERS: Renderers = {
     title: 'Nouveau message',
     body: `${clip(p.fromName)} vous a écrit.`,
     linkUrl: p.bookingId ? `/messages/${encodeURIComponent(p.bookingId)}` : '/messages',
+  }),
+  FEES_CHANGED_STAFF: (p) => ({
+    title: 'Commissions et frais modifiés',
+    body: `Commission hôte ${pct(p.hostPercent)}, frais voyageur ${pct(p.travelerPercent)}.`,
+    linkUrl: '/admin/frais',
+  }),
+  FEES_CHANGED_HOST: (p) => ({
+    title: 'Votre commission change',
+    body: p.launchEndsAt
+      ? `Commission SòôRooms : ${pct(p.hostPercent)} (offre de lancement) jusqu'au ${p.launchEndsAt}, puis ${pct(p.standardPercent)}.`
+      : `Commission SòôRooms : ${pct(p.hostPercent)} sur vos prochaines réservations.`,
+    linkUrl: '/hote/finances',
   }),
   ANNOUNCEMENT: (p) => ({
     title: clip(p.title, 100),

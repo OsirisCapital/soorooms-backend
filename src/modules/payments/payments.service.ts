@@ -21,6 +21,8 @@ import type { AppConfig } from '../../config/configuration.js';
 import type { PaymentMethod } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { computeAmounts } from '../fees/fees.utils.js';
+import { FeesService } from '../fees/fees.service.js';
 import { PayoutsService } from './payouts.service.js';
 import {
   PAYMENT_GATEWAY,
@@ -39,6 +41,8 @@ export class PaymentsService {
     // Optionnel : les notifications ne sont qu'un effet secondaire, jamais une condition du paiement.
     @Optional() private readonly notifications?: NotificationsService,
     @Optional() private readonly payouts?: PayoutsService,
+    // Réglages modifiables par le super administrateur ; absents (tests) : pourcentage de l'environnement.
+    @Optional() private readonly fees?: FeesService,
   ) {}
 
   async initiate(bookingId: string, userId: string) {
@@ -66,7 +70,8 @@ export class PaymentsService {
     const frontendUrl = this.configService.get('frontendUrl', { infer: true });
 
     const { paymentUrl, gatewayRef } = await this.gateway.initiatePayment({
-      amount: totalPrice,
+      // Ce que le voyageur paie vraiment : prix du séjour + frais voyageur (figés sur le séquestre).
+      amount: Number(escrow.amountHeld),
       currency: 'XAF',
       // Référence neuve à chaque tentative : l'agrégateur exige une référence
       // unique par paiement, et un voyageur dont le premier essai a échoué doit
@@ -400,12 +405,24 @@ export class PaymentsService {
       return existing;
     }
 
-    const feePercent = this.configService.get('payment.platformFeePercent', { infer: true });
-    const platformFee = Math.round((totalPrice * feePercent) / 100);
-    const hostPayout = totalPrice - platformFee;
+    // Taux en vigueur à cet instant, figés sur le séquestre : un changement ultérieur ne touche pas cette réservation.
+    const rates =
+      (await this.fees?.currentRates()) ?? {
+        hostCommissionPercent: this.configService.get('payment.platformFeePercent', { infer: true }),
+        travelerFeePercent: 0,
+      };
+    const amounts = computeAmounts(totalPrice, rates);
 
     return this.prisma.escrowVault.create({
-      data: { bookingId, amountHeld: totalPrice, platformFee, hostPayout },
+      data: {
+        bookingId,
+        amountHeld: amounts.amountHeld,
+        platformFee: amounts.platformFee,
+        hostPayout: amounts.hostPayout,
+        hostCommissionPercent: rates.hostCommissionPercent,
+        travelerFeePercent: rates.travelerFeePercent,
+        travelerFee: amounts.travelerFee,
+      },
     });
   }
 }

@@ -414,9 +414,13 @@ model EscrowVault {
   id            String       @id @default(uuid())
   bookingId     String       @unique
   booking       Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  amountHeld    Decimal      @db.Decimal(10, 2)
-  platformFee   Decimal      @db.Decimal(10, 2) // 10%
-  hostPayout    Decimal      @db.Decimal(10, 2) // 90%
+  amountHeld    Decimal      @db.Decimal(10, 2) // prix du séjour + frais voyageur
+  platformFee   Decimal      @db.Decimal(10, 2) // revenu de la plateforme : commission hôte + frais voyageur
+  hostPayout    Decimal      @db.Decimal(10, 2) // prix du séjour - commission hôte
+  // Taux appliqués à CETTE réservation, figés au paiement (NULL : séquestre antérieur aux réglages).
+  hostCommissionPercent Decimal? @db.Decimal(5, 2)
+  travelerFeePercent    Decimal? @db.Decimal(5, 2)
+  travelerFee           Decimal  @default(0) @db.Decimal(10, 2)
   status        EscrowStatus @default(HELD_IN_ESCROW)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -726,4 +730,18 @@ model StaffTask {
 
   @@index([assigneeId, status])
   @@index([status, dueDate])
+}
+
+/// Réglages des commissions et frais. Une ligne par modification : la plus récente est en vigueur.
+model PlatformFeeConfig {
+  id                          String    @id @default(uuid())
+  hostCommissionPercent       Decimal   @db.Decimal(5, 2)
+  launchHostCommissionPercent Decimal?  @db.Decimal(5, 2)
+  launchEndsAt                DateTime?
+  travelerFeePercent          Decimal   @db.Decimal(5, 2)
+  note                        String?
+  createdById                 String?
+  createdAt                   DateTime  @default(now())
+
+  @@index([createdAt])
 }

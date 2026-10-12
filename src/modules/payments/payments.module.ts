@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { FeesModule } from '../fees/fees.module.js';
 import { NotchPayGateway } from './gateways/notchpay.gateway.js';
 import { PAYMENT_GATEWAY } from './interfaces/payment-gateway.interface.js';
 import { PaymentsController } from './payments.controller.js';
@@ -7,6 +8,7 @@ import { AdminPayoutsController, PayoutDetailsController } from './payouts.contr
 import { PayoutsService } from './payouts.service.js';
 
 @Module({
+  imports: [FeesModule],
   controllers: [PaymentsController, AdminPayoutsController, PayoutDetailsController],
   providers: [
     PaymentsService,

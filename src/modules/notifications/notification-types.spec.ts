@@ -105,6 +105,8 @@ describe('renderNotification', () => {
       TASK_ASSIGNED: { taskId: 't', title: 'T', fromName: 'A', dueDate: '10/10/2026' },
       TASK_DONE: { taskId: 't', title: 'T', byName: 'A' },
       MESSAGE_RECEIVED: { fromName: 'A', bookingId: 'b1' },
+      FEES_CHANGED_STAFF: { hostPercent: 5, travelerPercent: 3 },
+      FEES_CHANGED_HOST: { hostPercent: 5, standardPercent: 10, launchEndsAt: '2027-01-12' },
       ANNOUNCEMENT: { title: 'T', body: 'B' },
     };
     for (const type of Object.keys(samples) as NotificationType[]) {
