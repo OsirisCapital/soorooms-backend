@@ -7,7 +7,7 @@
  * explicite ci-dessous).
  */
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PropertyType } from '../../../prisma/client.js';
 
 const toBoolean = ({ value }: { value: unknown }) => {
@@ -80,6 +80,11 @@ export class SearchRoomsQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   hasParking?: boolean;
+
+  // « price » (défaut) : moins cher d'abord ; « verified » : logements vérifiés sur place en tête.
+  @IsOptional()
+  @IsIn(['price', 'verified'])
+  sort?: 'price' | 'verified';
 
   @IsOptional()
   @Type(() => Number)

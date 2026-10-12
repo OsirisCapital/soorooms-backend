@@ -10,6 +10,26 @@ import type { SearchRoomsQueryDto } from './dto/search-rooms.query.dto.js';
 
 // Mêmes statuts que BookingsService pour verrouiller le calendrier (voir availability.utils).
 
+// Seul le statut KYC du gestionnaire sert à poser le badge : on n'expose jamais l'équipe elle-même.
+const HOST_KYC = { where: { role: 'MANAGER' as const }, select: { user: { select: { kycStatus: true } } } };
+
+type WithCollaborators = { collaborators?: { user: { kycStatus: string } }[] };
+
+/** Badge « identité vérifiée » : au moins un gestionnaire dont le KYC est approuvé. */
+export function hostIdentityVerified(property: WithCollaborators): boolean {
+  return (property.collaborators ?? []).some((c) => c.user.kycStatus === 'APPROVED');
+}
+
+function stripCollaborators<T extends WithCollaborators>(property: T) {
+  const { collaborators, ...rest } = property;
+  void collaborators;
+  return { ...rest, identityVerified: hostIdentityVerified(property) };
+}
+
+function withVerification<T extends { property: WithCollaborators }>(room: T) {
+  return { ...room, property: stripCollaborators(room.property) };
+}
+
 @Injectable()
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
@@ -46,8 +66,14 @@ export class SearchService {
     if (query.maxGuests !== undefined) {
       roomWhere.maxGuests = { gte: query.maxGuests };
     }
+    // « Vérifiés d'abord » : logements vérifiés sur place en tête, puis prix croissant.
+    const orderBy =
+      query.sort === 'verified'
+        ? [{ property: { isVerifiedByAgent: 'desc' as const } }, { basePrice: 'asc' as const }]
+        : [{ basePrice: 'asc' as const }];
+
     const roomInclude = {
-      property: { include: { amenities: true, photos: { orderBy: { position: 'asc' as const } } } },
+      property: { include: { amenities: true, photos: { orderBy: { position: 'asc' as const } }, collaborators: HOST_KYC } },
       photos: { orderBy: { position: 'asc' as const } },
     };
 
@@ -59,11 +85,11 @@ export class SearchService {
           include: roomInclude,
           skip: (page - 1) * limit,
           take: limit,
-          orderBy: { basePrice: 'asc' },
+          orderBy,
         }),
         this.prisma.room.count({ where: roomWhere }),
       ]);
-      const results = rooms.map((r) => ({ ...r, unitsLeft: r.unitCount }));
+      const results = rooms.map((r) => ({ ...withVerification(r), unitsLeft: r.unitCount }));
       return { results, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) };
     }
 
@@ -84,11 +110,11 @@ export class SearchService {
           select: { checkInDate: true, checkOutDate: true },
         },
       },
-      orderBy: { basePrice: 'asc' },
+      orderBy,
     });
     const available = candidates
       .map(({ bookings, ...room }) => ({
-        ...room,
+        ...withVerification(room),
         unitsLeft: unitsLeft(room.unitCount, bookings, checkIn, checkOut),
       }))
       .filter((r) => r.unitsLeft > 0);
@@ -105,6 +131,7 @@ export class SearchService {
       include: {
         amenities: true,
         photos: { orderBy: { position: 'asc' } },
+        collaborators: HOST_KYC,
         rooms: {
           include: {
             photos: { orderBy: { position: 'asc' } },
@@ -135,7 +162,7 @@ export class SearchService {
         ? unitsLeft(room.unitCount, bookings, checkIn, checkOut)
         : unitsLeft(room.unitCount, bookings, startOfToday(), new Date(startOfToday().getTime() + 24 * 3_600_000)),
     }));
-    return { ...property, rooms };
+    return { ...stripCollaborators(property), rooms };
   }
 }
 
