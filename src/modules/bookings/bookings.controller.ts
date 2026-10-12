@@ -5,6 +5,7 @@ import { BookingsService } from './bookings.service.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
 import { CreateOfferDto } from './dto/create-offer.dto.js';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
+import { IssueInvoiceDto } from './dto/invoice.dto.js';
 
 @ApiBearerAuth()
 @Controller('bookings')
@@ -24,6 +25,12 @@ export class BookingsController {
   @Get(':id/receipt')
   receipt(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.bookingsService.getReceipt(id, user.id);
+  }
+
+  @Post(':id/invoice')
+  @HttpCode(HttpStatus.OK)
+  issueInvoice(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: IssueInvoiceDto) {
+    return this.bookingsService.issueInvoice(id, user.id, dto);
   }
 
   @Get(':id')

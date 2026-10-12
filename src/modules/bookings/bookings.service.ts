@@ -19,8 +19,9 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
-import { countNights, receiptReference, type Receipt } from './receipt.js';
+import { countNights, invoiceNumber, receiptReference, type Receipt } from './receipt.js';
 import { isExpired, MAX_OPEN_REQUESTS, RESPONSE_WINDOW_MS } from './request-window.js';
+import type { IssueInvoiceDto } from './dto/invoice.dto.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
@@ -171,7 +172,41 @@ export class BookingsService {
       totalPaid,
       paymentMethod: payment.paymentMethod,
       refunded: escrow.status === 'REFUNDED_TO_TRAVELER',
+      invoice:
+        booking.invoiceIssuedAt && booking.invoiceCompany && booking.invoiceAddress
+          ? {
+              number: invoiceNumber(booking.id),
+              company: booking.invoiceCompany,
+              address: booking.invoiceAddress,
+              taxId: booking.invoiceTaxId,
+              issuedAt: booking.invoiceIssuedAt,
+            }
+          : null,
     };
+  }
+
+  /**
+   * Facture entreprise, à la demande du voyageur et seulement après paiement. Une fois émise, elle
+   * ne change plus (une facture modifiée après coup n'est plus une facture) : en cas d'erreur, le support la réinitialise.
+   */
+  async issueInvoice(bookingId: string, userId: string, dto: IssueInvoiceDto): Promise<Receipt> {
+    const receipt = await this.getReceipt(bookingId, userId); // vérifie voyageur + paiement effectué
+    if (receipt.invoice) {
+      throw new ConflictException('La facture de cette réservation est déjà émise.');
+    }
+    const issued = await this.prisma.booking.updateMany({
+      where: { id: bookingId, travelerId: userId, invoiceIssuedAt: null },
+      data: {
+        invoiceCompany: dto.company,
+        invoiceAddress: dto.address,
+        invoiceTaxId: dto.taxId?.trim() || null,
+        invoiceIssuedAt: new Date(),
+      },
+    });
+    if (issued.count === 0) {
+      throw new ConflictException('La facture de cette réservation est déjà émise.');
+    }
+    return this.getReceipt(bookingId, userId);
   }
 
   // ---------------------------------------------------------------------

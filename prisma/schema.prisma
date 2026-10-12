@@ -407,6 +407,11 @@ model Booking {
   // Renseignés quand la personne qui réserve et paie n'est pas celle qui séjournera.
   guestName     String?
   guestPhone    String?
+  // Facture entreprise, demandée par le voyageur après paiement (figée une fois émise).
+  invoiceCompany  String?
+  invoiceAddress  String?
+  invoiceTaxId    String?
+  invoiceIssuedAt DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
   // Le nom du signataire est copié au moment de la signature : il ne change pas si le profil change.
   attestationCode       String?   @unique

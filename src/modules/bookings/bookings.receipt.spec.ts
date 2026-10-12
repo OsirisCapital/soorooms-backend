@@ -23,8 +23,9 @@ function setup(over: Record<string, unknown> = {}) {
     },
     ...over,
   };
-  const prisma = { booking: { findUnique: vi.fn().mockResolvedValue(booking) } };
-  return new BookingsService(prisma as unknown as PrismaService, {} as PaymentsService, {} as NotificationsService);
+  const prisma = { booking: { findUnique: vi.fn().mockResolvedValue(booking), updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
+  const service = new BookingsService(prisma as unknown as PrismaService, {} as PaymentsService, {} as NotificationsService);
+  return Object.assign(service, { prisma });
 }
 
 describe('reçu voyageur', () => {
@@ -41,5 +42,38 @@ describe('reçu voyageur', () => {
   it('refuse un autre utilisateur et une réservation non payée', async () => {
     await expect(setup().getReceipt('b', 'autre')).rejects.toThrow(/introuvable/);
     await expect(setup({ escrowVault: null }).getReceipt('b', 't1')).rejects.toThrow(/une fois le paiement/);
+  });
+});
+
+describe('facture entreprise', () => {
+  const dto = { company: 'ACME SARL', address: 'Rue 1, Douala', taxId: 'M012345678901A' };
+
+  it("l'émet une fois après paiement", async () => {
+    const svc = setup();
+    await svc.issueInvoice('b', 't1', dto);
+    expect(svc.prisma.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ invoiceIssuedAt: null }) }),
+    );
+  });
+
+  it('refuse une deuxième émission', async () => {
+    const issued = { invoiceCompany: 'X', invoiceAddress: 'Y', invoiceTaxId: null, invoiceIssuedAt: new Date() };
+    await expect(setup(issued).issueInvoice('b', 't1', dto)).rejects.toThrow(/déjà émise/);
+  });
+
+  it('refuse en cas de course (aucune ligne mise à jour)', async () => {
+    const svc = setup();
+    svc.prisma.booking.updateMany.mockResolvedValue({ count: 0 });
+    await expect(svc.issueInvoice('b', 't1', dto)).rejects.toThrow(/déjà émise/);
+  });
+
+  it('refuse un autre utilisateur ou un séjour non payé', async () => {
+    await expect(setup().issueInvoice('b', 'autre', dto)).rejects.toThrow(/introuvable/);
+    await expect(setup({ escrowVault: null }).issueInvoice('b', 't1', dto)).rejects.toThrow(/une fois le paiement/);
+  });
+
+  it('expose le bloc facture dans le reçu', async () => {
+    const r = await setup({ invoiceCompany: 'ACME', invoiceAddress: 'Douala', invoiceTaxId: null, invoiceIssuedAt: new Date('2026-10-12') }).getReceipt('b', 't1');
+    expect(r.invoice).toMatchObject({ number: 'FA-3F9A1C2B', company: 'ACME', taxId: null });
   });
 });
