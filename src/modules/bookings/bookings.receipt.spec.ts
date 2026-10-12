@@ -25,7 +25,8 @@ function setup(over: Record<string, unknown> = {}) {
   };
   const prisma = { booking: { findUnique: vi.fn().mockResolvedValue(booking), updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
   const service = new BookingsService(prisma as unknown as PrismaService, {} as PaymentsService, {} as NotificationsService);
-  return Object.assign(service, { prisma });
+  // `prisma` est privé dans le service : on l'expose sous un autre type pour piloter les mocks.
+  return service as unknown as { getReceipt: BookingsService['getReceipt']; issueInvoice: BookingsService['issueInvoice']; prisma: typeof prisma };
 }
 
 describe('reçu voyageur', () => {
