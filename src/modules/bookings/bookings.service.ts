@@ -18,6 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { countNights, receiptReference, type Receipt } from './receipt.js';
 import { isExpired, MAX_OPEN_REQUESTS, RESPONSE_WINDOW_MS } from './request-window.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
@@ -123,6 +124,44 @@ export class BookingsService {
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     return booking;
+  }
+
+  /** Reçu du voyageur : disponible dès qu'un paiement a abouti. */
+  async getReceipt(bookingId: string, userId: string): Promise<Receipt> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        traveler: { select: { fullName: true } },
+        room: { include: { property: true } },
+        escrowVault: { include: { transactions: { where: { transactionStatus: 'SUCCESS' }, orderBy: { createdAt: 'asc' }, take: 1 } } },
+      },
+    });
+    if (!booking || booking.travelerId !== userId) {
+      throw new NotFoundException('Réservation introuvable.');
+    }
+    const escrow = booking.escrowVault;
+    const payment = escrow?.transactions[0];
+    if (!escrow || !payment) {
+      throw new ConflictException('Le reçu est disponible une fois le paiement effectué.');
+    }
+    const totalPaid = Number(payment.amount);
+    const travelerFee = Number(escrow.travelerFee);
+    return {
+      reference: receiptReference(booking.id),
+      issuedAt: payment.createdAt,
+      travelerName: booking.traveler.fullName,
+      property: { title: booking.room.property.title, city: booking.room.property.city, quarter: booking.room.property.quarter },
+      roomName: booking.room.name,
+      checkInDate: booking.checkInDate,
+      checkOutDate: booking.checkOutDate,
+      nights: countNights(booking.checkInDate, booking.checkOutDate),
+      stayPrice: totalPaid - travelerFee,
+      travelerFee,
+      travelerFeePercent: escrow.travelerFeePercent === null ? null : Number(escrow.travelerFeePercent),
+      totalPaid,
+      paymentMethod: payment.paymentMethod,
+      refunded: escrow.status === 'REFUNDED_TO_TRAVELER',
+    };
   }
 
   // ---------------------------------------------------------------------

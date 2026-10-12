@@ -21,6 +21,11 @@ export class BookingsController {
     return this.bookingsService.findMine(user.id);
   }
 
+  @Get(':id/receipt')
+  receipt(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.bookingsService.getReceipt(id, user.id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.bookingsService.findOne(id, user.id);
