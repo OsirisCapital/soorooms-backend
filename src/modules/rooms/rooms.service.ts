@@ -55,7 +55,7 @@ export class RoomsService {
     today.setUTCHours(0, 0, 0, 0);
     const upcoming = await this.prisma.booking.findMany({
       where: { roomId, status: { in: [...BLOCKING_STATUSES] }, checkOutDate: { gt: today } },
-      select: { checkInDate: true, checkOutDate: true },
+      select: { checkInDate: true, checkOutDate: true, units: true },
     });
     if (upcoming.length === 0) return;
     const from = new Date(Math.min(...upcoming.map((b) => b.checkInDate.getTime())));

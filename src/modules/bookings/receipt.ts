@@ -19,6 +19,8 @@ export type Receipt = {
   refunded: boolean;
   /** Résidence étudiante : forfait réservé (SEMESTER ou YEAR), null pour un séjour classique. */
   stayTerm: string | null;
+  /** Réservation de groupe : nombre de chambres réservées ensemble. */
+  units: number;
   /** Paiement en deux temps (salle de fêtes) : ce qu'il reste à payer (0 si tout est réglé) et son échéance. */
   balanceDue: number;
   balanceDueAt: Date | null;

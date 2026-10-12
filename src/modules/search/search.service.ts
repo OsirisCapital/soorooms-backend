@@ -107,7 +107,7 @@ export class SearchService {
             checkInDate: { lt: checkOut },
             checkOutDate: { gt: checkIn },
           },
-          select: { checkInDate: true, checkOutDate: true },
+          select: { checkInDate: true, checkOutDate: true, units: true },
         },
       },
       orderBy,
@@ -144,7 +144,7 @@ export class SearchService {
                   ? { checkInDate: { lt: checkOut }, checkOutDate: { gt: checkIn } }
                   : { checkOutDate: { gt: new Date() } }),
               },
-              select: { checkInDate: true, checkOutDate: true },
+              select: { checkInDate: true, checkOutDate: true, units: true },
             },
           },
         },

@@ -7,7 +7,7 @@
  */
 export const BLOCKING_STATUSES = ['PENDING_PAYMENT', 'DEPOSIT_PAID', 'CONFIRMED_ESCROW', 'COMPLETED'] as const;
 
-export type Stay = { checkInDate: Date; checkOutDate: Date };
+export type Stay = { checkInDate: Date; checkOutDate: Date; /** Unités occupées (réservation de groupe) ; 1 si absent. */ units?: number };
 
 const DAY_MS = 24 * 3_600_000;
 /** Garde-fou : on ne parcourt jamais plus de deux ans de nuits d'un coup. */
@@ -20,7 +20,7 @@ export function peakOccupancy(stays: readonly Stay[], from: Date, to: Date): num
   for (let t = from.getTime(); t < end; t += DAY_MS) {
     let used = 0;
     for (const stay of stays) {
-      if (stay.checkInDate.getTime() <= t && t < stay.checkOutDate.getTime()) used += 1;
+      if (stay.checkInDate.getTime() <= t && t < stay.checkOutDate.getTime()) used += stay.units ?? 1;
     }
     if (used > peak) peak = used;
   }

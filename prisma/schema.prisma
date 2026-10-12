@@ -427,6 +427,8 @@ model Booking {
   // Paiement en deux temps (salles de fêtes) : % d'acompte voulu, et échéance du solde fixée une fois l'acompte payé.
   // Résidence étudiante : forfait réservé (SEMESTER ou YEAR) ; la date de sortie en découle.
   stayTerm       String?
+  // Réservation de groupe : nombre d'unités (chambres) du type réservées ensemble.
+  units          Int           @default(1)
   depositPercent Int?
   balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).

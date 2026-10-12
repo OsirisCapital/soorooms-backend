@@ -37,6 +37,13 @@ export class CreateBookingDto {
   @Matches(/^\+?[0-9 ]{6,20}$/, { message: 'Numéro de téléphone invalide.' })
   guestPhone?: string;
 
+  // Réservation de groupe : nombre de chambres identiques demandées ensemble.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  units?: number;
+
   // Résidence étudiante : forfait réservé (la date de sortie en découle).
   @IsOptional()
   @IsIn(STAY_TERMS)

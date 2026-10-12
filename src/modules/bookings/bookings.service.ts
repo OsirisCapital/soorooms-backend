@@ -72,6 +72,11 @@ export class BookingsService {
     const isHall = room.property.propertyType === 'EVENT_HALL';
     // Résidence étudiante : forfait semestre/année à partir de la date d'entrée.
     const isResidence = room.property.propertyType === 'STUDENT_RESIDENCE';
+    // Réservation de groupe : plusieurs chambres identiques en une demande (jamais pour une salle).
+    const units = isHall ? 1 : (dto.units ?? 1);
+    if (units > room.unitCount) {
+      throw new BadRequestException(`Ce type compte ${room.unitCount} chambre${room.unitCount > 1 ? 's' : ''} au total.`);
+    }
     let termAmount: number | null = null;
     if (isResidence) {
       if (!dto.stayTerm) throw new BadRequestException('Choisissez le forfait : semestre ou année.');
@@ -116,15 +121,15 @@ export class BookingsService {
       );
     }
 
-    await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate);
+    await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate, undefined, this.prisma, units);
 
     const proposedPrice =
       dto.proposedPrice ??
       (isHall
         ? eventDefaultPrice(room.basePrice, chosenOptions)
         : termAmount != null
-          ? termAmount
-          : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate));
+          ? termAmount * units
+          : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate) * units);
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
@@ -137,6 +142,7 @@ export class BookingsService {
           guestPhone: dto.guestPhone?.replace(/\s+/g, ' ').trim() || null,
           ...(eventData ?? {}),
           ...(isResidence ? { stayTerm: dto.stayTerm } : {}),
+          units,
           // Salle de fêtes : paiement en deux temps (acompte puis solde), si l'événement est assez loin.
           ...(isHall ? { depositPercent: HALL_DEPOSIT_PERCENT } : {}),
         },
@@ -227,6 +233,7 @@ export class BookingsService {
       paymentMethod: payment.paymentMethod,
       refunded: escrow.status === 'REFUNDED_TO_TRAVELER',
       stayTerm: booking.stayTerm ?? null,
+      units: booking.units ?? 1,
       balanceDue,
       balanceDueAt: balanceDue > 0 ? booking.balanceDueAt : null,
       invoice:
@@ -316,7 +323,7 @@ export class BookingsService {
       // déjà prises. Sans ce verrou, la vérification de chevauchement et la
       // mise à jour étaient deux étapes séparées — double réservation possible.
       await tx.$queryRaw`SELECT id FROM "Room" WHERE id = ${booking.roomId} FOR UPDATE`;
-      await this.assertUnitAvailable(booking.roomId, booking.checkInDate, booking.checkOutDate, booking.id, tx);
+      await this.assertUnitAvailable(booking.roomId, booking.checkInDate, booking.checkOutDate, booking.id, tx, booking.units);
 
       // Garde atomique : l'offre doit toujours être celle en attente (une
       // contre-offre a pu arriver entre-temps) et la négociation ouverte.
@@ -621,6 +628,7 @@ export class BookingsService {
     checkOutDate: Date,
     excludeBookingId?: string,
     db: Pick<PrismaService, 'booking' | 'room'> = this.prisma,
+    units = 1,
   ) {
     const room = await db.room.findUnique({ where: { id: roomId }, select: { unitCount: true } });
     const stays = await db.booking.findMany({
@@ -631,10 +639,15 @@ export class BookingsService {
         checkInDate: { lt: checkOutDate },
         checkOutDate: { gt: checkInDate },
       },
-      select: { checkInDate: true, checkOutDate: true },
+      select: { checkInDate: true, checkOutDate: true, units: true },
     });
-    if (unitsLeft(room?.unitCount ?? 1, stays, checkInDate, checkOutDate) < 1) {
-      throw new ConflictException('Ces dates ne sont plus disponibles pour cette chambre.');
+    const left = unitsLeft(room?.unitCount ?? 1, stays, checkInDate, checkOutDate);
+    if (left < units) {
+      throw new ConflictException(
+        left < 1
+          ? 'Ces dates ne sont plus disponibles pour cette chambre.'
+          : `Il ne reste que ${left} chambre${left > 1 ? 's' : ''} de ce type sur ces dates.`,
+      );
     }
   }
 
