@@ -396,6 +396,17 @@ model Booking {
   // Renseignés quand la personne qui réserve et paie n'est pas celle qui séjournera.
   guestName     String?
   guestPhone    String?
+  // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
+  // Le nom du signataire est copié au moment de la signature : il ne change pas si le profil change.
+  attestationCode       String?   @unique
+  attestationSignedAt   DateTime?
+  attestationSignedById String?
+  attestationSignerName String?
+  // Demande du voyageur (pays déclaré) et éventuel refus motivé de l'hôte.
+  attestationRequestedAt   DateTime?
+  attestationCountry       String?
+  attestationDeclinedAt    DateTime?
+  attestationDeclineReason String?
   // Double validation post-paiement : le passage à COMPLETED (et donc le
   // déclenchement du reversement à l'hôte) n'a lieu que lorsque les DEUX
   // champs sont renseignés — voir BookingsService.maybeComplete. Ni l'un

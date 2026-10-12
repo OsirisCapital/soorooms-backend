@@ -17,6 +17,9 @@ export type NotificationPayloads = {
   OFFER_RECEIVED: { bookingId: string; audience: Audience; amount: number; fromName: string };
   OFFER_ACCEPTED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
   OFFER_REJECTED: { bookingId: string; audience: Audience; propertyTitle: string };
+  ATTESTATION_REQUESTED: { bookingId: string; travelerName: string; propertyTitle: string }; // → gérants
+  ATTESTATION_SIGNED: { bookingId: string; propertyTitle: string }; // → voyageur
+  ATTESTATION_DECLINED: { bookingId: string; propertyTitle: string; reason: string }; // → voyageur
   BOOKING_EXPIRED: { bookingId: string; audience: Audience; propertyTitle: string }; // demande sans réponse sous 2 h
   // Paiement et séjour
   PAYMENT_CONFIRMED: { bookingId: string; audience: Audience; amount: number; propertyTitle: string };
@@ -124,6 +127,21 @@ const RENDERERS: Renderers = {
     title: 'Négociation terminée',
     body: `La demande pour « ${clip(p.propertyTitle)} » a été refusée : la réservation est annulée.`,
     linkUrl: bookingLink(p.audience, p.bookingId),
+  }),
+  ATTESTATION_REQUESTED: (p) => ({
+    title: 'Attestation de réservation demandée',
+    body: `${clip(p.travelerName)} demande l’attestation de sa réservation à « ${clip(p.propertyTitle)} ». Ouvrez la réservation pour la signer.`,
+    linkUrl: bookingLink('host', p.bookingId),
+  }),
+  ATTESTATION_DECLINED: (p) => ({
+    title: 'Attestation refusée',
+    body: `L’hôte de « ${clip(p.propertyTitle)} » n’a pas signé l’attestation. Motif : ${clip(p.reason, 160)}. Votre reçu reste disponible.`,
+    linkUrl: bookingLink('traveler', p.bookingId),
+  }),
+  ATTESTATION_SIGNED: (p) => ({
+    title: 'Attestation signée ✓',
+    body: `Votre attestation de réservation pour « ${clip(p.propertyTitle)} » est prête : vous pouvez la télécharger.`,
+    linkUrl: bookingLink('traveler', p.bookingId),
   }),
   BOOKING_EXPIRED: (p) => ({
     title: 'Demande expirée',
