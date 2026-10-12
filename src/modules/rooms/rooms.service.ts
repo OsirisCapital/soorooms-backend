@@ -63,6 +63,16 @@ export class RoomsService {
         'Cette chambre a des réservations : elle ne peut pas être supprimée. Modifiez-la plutôt.',
       );
     }
+    // Un logement publié doit toujours proposer au moins une chambre réservable.
+    const property = await this.prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { status: true, _count: { select: { rooms: true } } },
+    });
+    if (property?.status === 'ACTIVE' && property._count.rooms <= 1) {
+      throw new ConflictException(
+        'C’est la seule chambre de ce logement publié : ajoutez-en une autre avant de la supprimer.',
+      );
+    }
     await this.prisma.room.delete({ where: { id: roomId } });
   }
 
