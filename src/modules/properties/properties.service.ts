@@ -18,6 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import type { AddPhotoDto } from './dto/add-photo.dto.js';
 import type { CreatePropertyDto } from './dto/create-property.dto.js';
+import type { CreateHallOptionDto } from './dto/hall-option.dto.js';
 import type { InviteCollaboratorDto } from './dto/invite-collaborator.dto.js';
 import type { UpdateAmenitiesDto } from './dto/update-amenities.dto.js';
 import type { UpdatePropertyDto } from './dto/update-property.dto.js';
@@ -79,6 +80,26 @@ export class PropertiesService {
 
   async update(propertyId: string, dto: UpdatePropertyDto) {
     return this.prisma.property.update({ where: { id: propertyId }, data: dto });
+  }
+
+  // Options payantes d'une salle de fêtes (sono, traiteur…). Les réservations en gardent une copie figée.
+  async listHallOptions(propertyId: string) {
+    return this.prisma.hallOption.findMany({ where: { propertyId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  async addHallOption(propertyId: string, dto: CreateHallOptionDto) {
+    const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { propertyType: true } });
+    if (property?.propertyType !== 'EVENT_HALL') {
+      throw new BadRequestException('Les options ne concernent que les salles de fêtes.');
+    }
+    const count = await this.prisma.hallOption.count({ where: { propertyId } });
+    if (count >= 30) throw new BadRequestException('30 options au maximum par salle.');
+    return this.prisma.hallOption.create({ data: { propertyId, name: dto.name, price: dto.price } });
+  }
+
+  async removeHallOption(propertyId: string, optionId: string) {
+    const removed = await this.prisma.hallOption.deleteMany({ where: { id: optionId, propertyId } });
+    if (removed.count === 0) throw new NotFoundException('Option introuvable.');
   }
 
   async updateAmenities(propertyId: string, dto: UpdateAmenitiesDto) {

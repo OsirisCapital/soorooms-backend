@@ -19,6 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { eventDefaultPrice, guestsError, type EventOptionSnapshot, type EventSlot } from './event.utils.js';
 import { countNights, invoiceNumber, receiptReference, type Receipt } from './receipt.js';
 import { isExpired, MAX_OPEN_REQUESTS, RESPONSE_WINDOW_MS } from './request-window.js';
 import type { IssueInvoiceDto } from './dto/invoice.dto.js';
@@ -44,10 +45,6 @@ export class BookingsService {
 
   async create(travelerId: string, dto: CreateBookingDto) {
     const checkInDate = new Date(dto.checkInDate);
-    const checkOutDate = new Date(dto.checkOutDate);
-    if (checkOutDate <= checkInDate) {
-      throw new BadRequestException("La date de départ doit être postérieure à la date d'arrivée.");
-    }
 
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -69,6 +66,33 @@ export class BookingsService {
       throw new ForbiddenException('Vous ne pouvez pas réserver un logement que vous gérez.');
     }
 
+    // Salle de fêtes : un événement = une date (le lendemain sert de borne de fin) + créneau, invités, options.
+    const isHall = room.property.propertyType === 'EVENT_HALL';
+    const checkOutDate = isHall ? new Date(checkInDate.getTime() + 24 * 3_600_000) : new Date(dto.checkOutDate ?? '');
+    if (!isHall && (!dto.checkOutDate || checkOutDate <= checkInDate)) {
+      throw new BadRequestException("La date de départ doit être postérieure à la date d'arrivée.");
+    }
+    let eventData: { eventType: string; eventSlot: EventSlot; eventGuests: number; eventOptions: EventOptionSnapshot[] } | null = null;
+    let chosenOptions: { id: string; name: string; price: unknown }[] = [];
+    if (isHall) {
+      if (!dto.eventType?.trim() || !dto.eventSlot || !dto.eventGuests) {
+        throw new BadRequestException("Précisez le type d'événement, le créneau et le nombre d'invités.");
+      }
+      const tooMany = guestsError(dto.eventGuests, room.maxGuests);
+      if (tooMany) throw new BadRequestException(tooMany);
+      const ids = [...new Set(dto.optionIds ?? [])];
+      chosenOptions = ids.length ? await this.prisma.hallOption.findMany({ where: { id: { in: ids }, propertyId: room.propertyId } }) : [];
+      if (chosenOptions.length !== ids.length) {
+        throw new BadRequestException("Une des options choisies n'existe plus. Rechargez la page.");
+      }
+      eventData = {
+        eventType: dto.eventType.trim(),
+        eventSlot: dto.eventSlot,
+        eventGuests: dto.eventGuests,
+        eventOptions: chosenOptions.map((o) => ({ id: o.id, name: o.name, price: Number(o.price) })),
+      };
+    }
+
     // Quota : un voyageur ne bloque pas plusieurs hôtes à la fois sans réponse.
     await this.expireStale({ travelerId });
     const open = await this.prisma.booking.count({ where: { travelerId, status: 'NEGOTIATING' } });
@@ -80,7 +104,9 @@ export class BookingsService {
 
     await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate);
 
-    const proposedPrice = dto.proposedPrice ?? this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate);
+    const proposedPrice =
+      dto.proposedPrice ??
+      (isHall ? eventDefaultPrice(room.basePrice, chosenOptions) : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate));
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
@@ -91,6 +117,7 @@ export class BookingsService {
           checkOutDate,
           guestName: dto.guestName?.trim() || null,
           guestPhone: dto.guestPhone?.replace(/\s+/g, ' ').trim() || null,
+          ...(eventData ?? {}),
         },
       });
       await tx.priceOffer.create({

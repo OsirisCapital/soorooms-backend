@@ -130,6 +130,7 @@ export class SearchService {
       where: { id: propertyId },
       include: {
         amenities: true,
+        hallOptions: { orderBy: { createdAt: 'asc' } },
         photos: { orderBy: { position: 'asc' } },
         collaborators: HOST_KYC,
         rooms: {

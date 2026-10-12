@@ -20,6 +20,7 @@ import type { CollaboratorRole, UserRole } from '../../prisma/client.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import { AddPhotoDto } from './dto/add-photo.dto.js';
 import { CreatePropertyDto } from './dto/create-property.dto.js';
+import { CreateHallOptionDto } from './dto/hall-option.dto.js';
 import { ChangeCollaboratorRoleDto, InviteCollaboratorDto } from './dto/invite-collaborator.dto.js';
 import { UpdateAmenitiesDto } from './dto/update-amenities.dto.js';
 import { UpdatePropertyDto } from './dto/update-property.dto.js';
@@ -59,6 +60,26 @@ export class PropertiesController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdatePropertyDto) {
     return this.propertiesService.update(id, dto);
+  }
+
+  @UseGuards(PropertyCollaboratorGuard)
+  @RequireCapability('property.view')
+  @Get(':id/hall-options')
+  listHallOptions(@Param('id') id: string) {
+    return this.propertiesService.listHallOptions(id);
+  }
+
+  @UseGuards(PropertyCollaboratorGuard)
+  @Post(':id/hall-options')
+  addHallOption(@Param('id') id: string, @Body() dto: CreateHallOptionDto) {
+    return this.propertiesService.addHallOption(id, dto);
+  }
+
+  @UseGuards(PropertyCollaboratorGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':id/hall-options/:optionId')
+  async removeHallOption(@Param('id') id: string, @Param('optionId') optionId: string) {
+    await this.propertiesService.removeHallOption(id, optionId);
   }
 
   @UseGuards(PropertyCollaboratorGuard)

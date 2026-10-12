@@ -1,4 +1,5 @@
-import { IsDateString, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
+import { EVENT_SLOTS, type EventSlot } from '../event.utils.js';
 
 export class CreateBookingDto {
   @IsUUID()
@@ -7,8 +8,10 @@ export class CreateBookingDto {
   @IsDateString()
   checkInDate!: string;
 
+  // Facultatif pour une salle de fêtes (un événement = une date) ; exigé pour un séjour.
+  @IsOptional()
   @IsDateString()
-  checkOutDate!: string;
+  checkOutDate?: string;
 
   // Optionnel : si omis, le service propose automatiquement le prix de
   // base de la chambre pour la durée demandée — ça couvre aussi bien le
@@ -32,4 +35,27 @@ export class CreateBookingDto {
   @IsString()
   @Matches(/^\+?[0-9 ]{6,20}$/, { message: 'Numéro de téléphone invalide.' })
   guestPhone?: string;
+
+  // Salle de fêtes uniquement.
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(60)
+  eventType?: string;
+
+  @IsOptional()
+  @IsIn(EVENT_SLOTS)
+  eventSlot?: EventSlot;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100_000)
+  eventGuests?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsUUID('all', { each: true })
+  optionIds?: string[];
 }
