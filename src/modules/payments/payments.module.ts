@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { FeesModule } from '../fees/fees.module.js';
 import { NotchPayGateway } from './gateways/notchpay.gateway.js';
 import { PAYMENT_GATEWAY } from './interfaces/payment-gateway.interface.js';
+import { PayLinksService } from './pay-links.service.js';
+import { BookingPayLinkController, PublicPayLinkController } from './pay-links.controller.js';
 import { PaymentsController } from './payments.controller.js';
 import { PaymentsService } from './payments.service.js';
 import { AdminPayoutsController, PayoutDetailsController } from './payouts.controller.js';
@@ -10,9 +12,10 @@ import { VisitPaymentsService } from './visit-payments.service.js';
 
 @Module({
   imports: [FeesModule],
-  controllers: [PaymentsController, AdminPayoutsController, PayoutDetailsController],
+  controllers: [PaymentsController, BookingPayLinkController, PublicPayLinkController, AdminPayoutsController, PayoutDetailsController],
   providers: [
     PaymentsService,
+    PayLinksService,
     PayoutsService,
     VisitPaymentsService,
     // Bascule ici vers une autre implémentation (CinetPay, par exemple)

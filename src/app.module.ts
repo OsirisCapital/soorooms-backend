@@ -18,6 +18,7 @@ import { AdminModule } from './modules/admin/admin.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { FavoritesModule } from './modules/favorites/favorites.module.js';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module.js';
 import { FeesModule } from './modules/fees/fees.module.js';
 import { FinanceModule } from './modules/finance/finance.module.js';
 import { KycModule } from './modules/kyc/kyc.module.js';
@@ -59,6 +60,7 @@ import { MessagesModule } from './modules/messages/messages.module.js';
     VisitsModule,
     FinanceModule,
     FavoritesModule,
+    LoyaltyModule,
     UploadsModule,
     NotificationsModule,
     SupportModule,

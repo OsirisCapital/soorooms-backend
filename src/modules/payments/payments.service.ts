@@ -61,6 +61,25 @@ export class PaymentsService {
     if (booking.travelerId !== userId) {
       throw new ForbiddenException('Seul le voyageur de cette réservation peut initier le paiement.');
     }
+    return this.startPayment(booking, this.buildCustomer(booking.traveler), `/profil/reservations/${booking.id}`);
+  }
+
+  /** Somme attendue maintenant pour une réservation payable (crée le séquestre au besoin, comme le ferait le paiement). */
+  async quote(booking: { id: string; status: string; totalPrice: unknown; checkInDate: Date; depositPercent?: number | null }) {
+    if (booking.totalPrice == null || (booking.status !== 'PENDING_PAYMENT' && booking.status !== 'DEPOSIT_PAID')) return null;
+    const escrow = await this.getOrCreateEscrow(booking, Number(booking.totalPrice));
+    return nextStage(booking, escrow);
+  }
+
+  /**
+   * Lance le paiement d'une réservation pour un payeur donné. Les contrôles d'accès (voyageur connecté ou
+   * lien de paiement valide) sont faits par l'appelant ; ici : état de la réservation, montant, séquestre.
+   */
+  async startPayment(
+    booking: { id: string; status: string; totalPrice: unknown; checkInDate: Date; depositPercent?: number | null; balanceDueAt?: Date | null; room: { name: string } },
+    customer: PaymentCustomer,
+    callbackPath: string,
+  ) {
     if (booking.status !== 'PENDING_PAYMENT' && booking.status !== 'DEPOSIT_PAID') {
       throw new ConflictException("Cette réservation n'est pas en attente de paiement.");
     }
@@ -76,7 +95,6 @@ export class PaymentsService {
       throw new ConflictException("Cette réservation n'attend aucun paiement.");
     }
 
-    const customer = this.buildCustomer(booking.traveler);
     const frontendUrl = this.configService.get('frontendUrl', { infer: true });
 
     const { paymentUrl, gatewayRef } = await this.gateway.initiatePayment({
@@ -89,7 +107,7 @@ export class PaymentsService {
       reference: `${booking.id}_${Date.now().toString(36)}`,
       description: `Réservation — ${booking.room.name}${stage.kind === 'DEPOSIT' ? ' (acompte)' : stage.kind === 'BALANCE' ? ' (solde)' : ''}`,
       customer,
-      callbackUrl: `${frontendUrl}/profil/reservations/${booking.id}`,
+      callbackUrl: `${frontendUrl}${callbackPath}`,
     });
 
     return { escrowId: escrow.id, paymentUrl, gatewayRef, stage: stage.kind, amount: stage.amount };
@@ -224,7 +242,11 @@ export class PaymentsService {
     if (booking.travelerId !== userId) {
       throw new ForbiddenException('Seul le voyageur de cette réservation peut vérifier son paiement.');
     }
+    return this.verifyBooking(booking, reference);
+  }
 
+  /** Vérification d'un paiement au retour (voyageur connecté ou lien de paiement) : l'accès est contrôlé par l'appelant. */
+  async verifyBooking(booking: { id: string; status: string }, reference: string) {
     // Le webhook est parfois arrivé avant le retour du voyageur : rien à refaire.
     if (['CONFIRMED_ESCROW', 'COMPLETED', 'DISPUTED'].includes(booking.status)) {
       return { confirmed: true, paymentStatus: 'SUCCESS' as const, bookingStatus: booking.status };

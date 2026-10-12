@@ -160,6 +160,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   favorites     Favorite[]
+  loyaltyEntries LoyaltyEntry[]
   auditLogs     AuditLog[]
   notifications Notification[]
   supportTickets  SupportTicket[] @relation("TicketRequester")
@@ -429,6 +430,8 @@ model Booking {
   stayTerm       String?
   // Réservation de groupe : nombre d'unités (chambres) du type réservées ensemble.
   units          Int           @default(1)
+  // Lien de paiement pour un proche (diaspora) : jeton secret, null tant qu'aucun lien n'a été créé.
+  payToken       String?       @unique
   depositPercent Int?
   balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
@@ -598,6 +601,25 @@ model VerificationTask {
 // Logements mis de côté par un utilisateur (étoile). Un logement ne peut être
 // favori qu'une fois par utilisateur ; la suppression du compte ou du
 // logement supprime aussi ses favoris.
+// Points de fidélité : un registre en ajouts uniquement. Le solde est la somme des lignes ; une ligne
+// n'est jamais modifiée (une correction ou une dépense future sera une nouvelle ligne, négative).
+model LoyaltyEntry {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points     Int
+  // STAY_COMPLETED (séjour terminé) ou FIRST_STAY_BONUS (premier séjour terminé).
+  reason     String
+  bookingId  String?
+  // Nom du logement au moment du gain, pour l'historique.
+  label      String?
+  createdAt  DateTime @default(now())
+
+  // Une réservation ne rapporte qu'une fois par motif, même si la confirmation est rejouée.
+  @@unique([bookingId, reason])
+  @@index([userId, createdAt])
+}
+
 model Favorite {
   id         String   @id @default(uuid())
   userId     String

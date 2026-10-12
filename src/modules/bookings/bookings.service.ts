@@ -12,7 +12,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { LoyaltyService } from '../loyalty/loyalty.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { can, userIdsWith } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -43,6 +45,8 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly paymentsService: PaymentsService,
     private readonly notifications: NotificationsService,
+    // Optionnel : les points de fidélité ne sont qu'un effet secondaire de la clôture d'une réservation.
+    @Optional() private readonly loyalty?: LoyaltyService,
   ) {}
 
   async create(travelerId: string, dto: CreateBookingDto) {
@@ -188,7 +192,9 @@ export class BookingsService {
     this.assertParticipant(booking, userId);
     // Prochain paiement attendu (paiement unique, acompte ou solde) — sans exposer le détail du séquestre.
     const escrow = await this.prisma.escrowVault.findUnique({ where: { bookingId }, select: { amountHeld: true, depositAmount: true } });
-    return { ...booking, nextPayment: escrow ? nextStage(booking, escrow) : null };
+    // Le jeton du lien de paiement est un secret du voyageur : jamais renvoyé tel quel, ni à l'hôte.
+    const { payToken, ...safe } = booking as typeof booking & { payToken?: string | null };
+    return { ...safe, payLinkActive: booking.travelerId === userId && !!payToken, nextPayment: escrow ? nextStage(booking, escrow) : null };
   }
 
   /** Reçu du voyageur : disponible dès qu'un paiement a abouti. */
@@ -460,6 +466,7 @@ export class BookingsService {
       // Notifié une seule fois : seulement si CET appel a fait passer la réservation à COMPLETED.
       if (done.count > 0) {
         await this.notifyCompletion(bookingId);
+        await this.loyalty?.awardForCompletedBooking(bookingId);
         return true;
       }
     }
