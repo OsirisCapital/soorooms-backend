@@ -21,7 +21,9 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { currentHourWat, napFits, NAP_MAX_HOURS, stayFitsHourly } from '../rooms/nap.utils.js';
 import { forfeitedAmounts, HALL_DEPOSIT_PERCENT, nextStage } from '../payments/deposit.utils.js';
+import { extrasTotal, type ExtraSnapshot } from './extras.utils.js';
 import { termEndDate, termPrice } from './stay-term.utils.js';
 import { eventDefaultPrice, guestsError, type EventOptionSnapshot, type EventSlot } from './event.utils.js';
 import { countNights, invoiceNumber, receiptReference, type Receipt } from './receipt.js';
@@ -77,7 +79,23 @@ export class BookingsService {
     // Résidence étudiante : forfait semestre/année à partir de la date d'entrée.
     const isResidence = room.property.propertyType === 'STUDENT_RESIDENCE';
     // Réservation de groupe : plusieurs chambres identiques en une demande (jamais pour une salle).
-    const units = isHall ? 1 : (dto.units ?? 1);
+    // Sieste : quelques heures le jour d'arrivée, au tarif de sieste de la chambre.
+    const isNap = dto.nap === true;
+    let napHours = 0;
+    if (isNap) {
+      if (isHall || isResidence) throw new BadRequestException('Les siestes ne sont pas proposées pour ce type de logement.');
+      if (!room.allowsNap || room.napPrice == null) throw new BadRequestException("Cette chambre n'accepte pas les siestes.");
+      if (dto.napStartHour == null) throw new BadRequestException('Choisissez l\'heure de début de la sieste.');
+      napHours = Math.min(room.napHours ?? 3, NAP_MAX_HOURS);
+      if (dto.napStartHour + napHours > 24) {
+        throw new BadRequestException(`Une sieste de ${napHours} h doit se terminer avant minuit : choisissez une heure plus tôt.`);
+      }
+      const now = currentHourWat();
+      if (dto.checkInDate.slice(0, 10) === now.date && dto.napStartHour < now.hour) {
+        throw new BadRequestException("L'heure de début de la sieste est déjà passée.");
+      }
+    }
+    const units = isHall || isNap ? 1 : (dto.units ?? 1);
     if (units > room.unitCount) {
       throw new BadRequestException(`Ce type compte ${room.unitCount} chambre${room.unitCount > 1 ? 's' : ''} au total.`);
     }
@@ -87,16 +105,27 @@ export class BookingsService {
       termAmount = termPrice(room, dto.stayTerm);
       if (termAmount == null) throw new BadRequestException("Ce forfait n'est pas proposé pour cette chambre.");
     }
-    const checkOutDate = isHall
+    const checkOutDate = isHall || isNap
       ? new Date(checkInDate.getTime() + 24 * 3_600_000)
       : isResidence && dto.stayTerm
         ? termEndDate(checkInDate, dto.stayTerm)
         : new Date(dto.checkOutDate ?? '');
-    if (!isHall && !isResidence && (!dto.checkOutDate || checkOutDate <= checkInDate)) {
+    if (!isHall && !isNap && !isResidence && (!dto.checkOutDate || checkOutDate <= checkInDate)) {
       throw new BadRequestException("La date de départ doit être postérieure à la date d'arrivée.");
     }
     let eventData: { eventType: string; eventSlot: EventSlot; eventGuests: number; eventOptions: EventOptionSnapshot[] } | null = null;
     let chosenOptions: { id: string; name: string; price: unknown }[] = [];
+    // Extras payants (navette, petit-déjeuner…) d'un séjour classique : copie figée des choix du voyageur.
+    let extras: ExtraSnapshot[] = [];
+    if (!isHall && dto.optionIds?.length) {
+      if (isResidence) throw new BadRequestException('Les options ne sont pas proposées pour une résidence étudiante.');
+      const ids = [...new Set(dto.optionIds)];
+      const found = await this.prisma.hallOption.findMany({ where: { id: { in: ids }, propertyId: room.propertyId } });
+      if (found.length !== ids.length) {
+        throw new BadRequestException("Une des options choisies n'existe plus. Rechargez la page.");
+      }
+      extras = found.map((o) => ({ id: o.id, name: o.name, price: Number(o.price), perNight: Boolean((o as { perNight?: boolean }).perNight) }));
+    }
     if (isHall) {
       if (!dto.eventType?.trim() || !dto.eventSlot || !dto.eventGuests) {
         throw new BadRequestException("Précisez le type d'événement, le créneau et le nombre d'invités.");
@@ -125,15 +154,26 @@ export class BookingsService {
       );
     }
 
-    await this.assertUnitAvailable(dto.roomId, checkInDate, checkOutDate, undefined, this.prisma, units);
+    await this.assertUnitAvailable(
+      dto.roomId,
+      checkInDate,
+      checkOutDate,
+      undefined,
+      this.prisma,
+      units,
+      isNap ? { startHour: dto.napStartHour as number, hours: napHours } : undefined,
+    );
 
     const proposedPrice =
       dto.proposedPrice ??
-      (isHall
+      (isNap
+        ? Number(room.napPrice) + extrasTotal(extras, 1)
+        : isHall
         ? eventDefaultPrice(room.basePrice, chosenOptions)
         : termAmount != null
           ? termAmount * units
-          : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate) * units);
+          : this.computeDefaultPrice(room.basePrice, checkInDate, checkOutDate) * units +
+            extrasTotal(extras, countNights(checkInDate, checkOutDate)));
 
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
@@ -146,6 +186,8 @@ export class BookingsService {
           guestPhone: dto.guestPhone?.replace(/\s+/g, ' ').trim() || null,
           ...(eventData ?? {}),
           ...(isResidence ? { stayTerm: dto.stayTerm } : {}),
+          ...(isNap ? { napStartHour: dto.napStartHour, napHours } : {}),
+          ...(extras.length ? { extras } : {}),
           units,
           // Salle de fêtes : paiement en deux temps (acompte puis solde), si l'événement est assez loin.
           ...(isHall ? { depositPercent: HALL_DEPOSIT_PERCENT } : {}),
@@ -240,6 +282,8 @@ export class BookingsService {
       refunded: escrow.status === 'REFUNDED_TO_TRAVELER',
       stayTerm: booking.stayTerm ?? null,
       units: booking.units ?? 1,
+      nap: booking.napStartHour != null ? { startHour: booking.napStartHour, hours: booking.napHours ?? 1 } : null,
+      extras: (booking.extras as ExtraSnapshot[] | null) ?? [],
       balanceDue,
       balanceDueAt: balanceDue > 0 ? booking.balanceDueAt : null,
       invoice:
@@ -329,7 +373,15 @@ export class BookingsService {
       // déjà prises. Sans ce verrou, la vérification de chevauchement et la
       // mise à jour étaient deux étapes séparées — double réservation possible.
       await tx.$queryRaw`SELECT id FROM "Room" WHERE id = ${booking.roomId} FOR UPDATE`;
-      await this.assertUnitAvailable(booking.roomId, booking.checkInDate, booking.checkOutDate, booking.id, tx, booking.units);
+      await this.assertUnitAvailable(
+        booking.roomId,
+        booking.checkInDate,
+        booking.checkOutDate,
+        booking.id,
+        tx,
+        booking.units,
+        booking.napStartHour != null ? { startHour: booking.napStartHour, hours: booking.napHours ?? 1 } : undefined,
+      );
 
       // Garde atomique : l'offre doit toujours être celle en attente (une
       // contre-offre a pu arriver entre-temps) et la négociation ouverte.
@@ -636,18 +688,38 @@ export class BookingsService {
     excludeBookingId?: string,
     db: Pick<PrismaService, 'booking' | 'room'> = this.prisma,
     units = 1,
+    nap?: { startHour: number; hours: number },
   ) {
     const room = await db.room.findUnique({ where: { id: roomId }, select: { unitCount: true } });
-    const stays = await db.booking.findMany({
+    // Sieste : contrôle heure par heure contre les séjours de la veille, du jour et du lendemain, et les autres siestes.
+    if (nap) {
+      const around = await db.booking.findMany({
+        where: {
+          roomId,
+          id: excludeBookingId ? { not: excludeBookingId } : undefined,
+          status: { in: [...BLOCKING_STATUSES] },
+          checkInDate: { lte: checkInDate },
+          checkOutDate: { gte: checkInDate },
+        },
+        select: { checkInDate: true, checkOutDate: true, units: true, napStartHour: true, napHours: true },
+      });
+      if (!napFits(room?.unitCount ?? 1, around, checkInDate, nap.startHour, nap.hours)) {
+        throw new ConflictException("Cette chambre n'est pas libre sur ce créneau. Choisissez une autre heure ou une autre chambre.");
+      }
+      return;
+    }
+    const staysRaw = await db.booking.findMany({
       where: {
         roomId,
         id: excludeBookingId ? { not: excludeBookingId } : undefined,
         status: { in: [...BLOCKING_STATUSES] },
+        napStartHour: null,
         checkInDate: { lt: checkOutDate },
         checkOutDate: { gt: checkInDate },
       },
-      select: { checkInDate: true, checkOutDate: true, units: true },
+      select: { checkInDate: true, checkOutDate: true, units: true, napStartHour: true },
     });
+    const stays = staysRaw.filter((b) => b.napStartHour == null);
     const left = unitsLeft(room?.unitCount ?? 1, stays, checkInDate, checkOutDate);
     if (left < units) {
       throw new ConflictException(
@@ -655,6 +727,21 @@ export class BookingsService {
           ? 'Ces dates ne sont plus disponibles pour cette chambre.'
           : `Il ne reste que ${left} chambre${left > 1 ? 's' : ''} de ce type sur ces dates.`,
       );
+    }
+    // Les siestes déjà réservées pendant ces jours occupent aussi des chambres, heure par heure.
+    const napsRaw = await db.booking.findMany({
+      where: {
+        roomId,
+        id: excludeBookingId ? { not: excludeBookingId } : undefined,
+        status: { in: [...BLOCKING_STATUSES] },
+        napStartHour: { not: null },
+        checkInDate: { gte: checkInDate, lte: checkOutDate },
+      },
+      select: { checkInDate: true, checkOutDate: true, units: true, napStartHour: true, napHours: true },
+    });
+    const naps = napsRaw.filter((b) => b.napStartHour != null);
+    if (naps.length > 0 && !stayFitsHourly(room?.unitCount ?? 1, [...stays, ...naps], checkInDate, checkOutDate, units)) {
+      throw new ConflictException('Une sieste déjà réservée occupe cette chambre pendant ce séjour. Choisissez d\'autres dates.');
     }
   }
 

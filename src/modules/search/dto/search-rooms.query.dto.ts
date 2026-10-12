@@ -17,6 +17,11 @@ const toBoolean = ({ value }: { value: unknown }) => {
 };
 
 export class SearchRoomsQueryDto {
+  // Pays (nom ou code ISO). Un logement sans pays renseigné compte comme camerounais (données historiques).
+  @IsOptional()
+  @IsString()
+  country?: string;
+
   @IsOptional()
   @IsString()
   city?: string;

@@ -4,6 +4,7 @@
  * être visibles avant validation complète (KYC + publication explicite).
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { DEFAULT_COUNTRY, findCountry } from '../../common/utils/countries.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
 import type { SearchRoomsQueryDto } from './dto/search-rooms.query.dto.js';
@@ -44,6 +45,17 @@ export class SearchService {
     // fonction et est validé de toute façon par Prisma à l'exécution.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const propertyWhere: any = { status: 'ACTIVE' };
+    const country = findCountry(query.country);
+    if (query.country && !country) {
+      // Pays non pris en charge : aucun logement, plutôt qu'une recherche silencieusement élargie.
+      return { results: [], page, limit, total: 0, totalPages: 1 };
+    }
+    if (country) {
+      propertyWhere.OR = [
+        { country: { equals: country.name, mode: 'insensitive' } },
+        ...(country.name === DEFAULT_COUNTRY ? [{ country: null }] : []),
+      ];
+    }
     if (query.city) propertyWhere.city = { equals: query.city, mode: 'insensitive' };
     if (query.quarter) propertyWhere.quarter = { equals: query.quarter, mode: 'insensitive' };
     if (query.propertyType) propertyWhere.propertyType = query.propertyType;

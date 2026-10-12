@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateRoomDto {
   @IsString()
@@ -51,4 +51,36 @@ export class CreateRoomDto {
   @Min(1)
   @Max(500)
   unitCount?: number;
+
+  // Siestes (hôtels et auberges) : séjour de quelques heures, au tarif propre à la chambre.
+  @IsOptional()
+  @IsBoolean()
+  allowsNap?: boolean;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(1)
+  @Max(99_999_999)
+  napPrice?: number | null;
+
+  // Durée d'une sieste, en heures.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  napHours?: number | null;
+
+  // Réglage « ampoule » de la chambre de sieste : allumée (true) ou éteinte (false).
+  @IsOptional()
+  @IsBoolean()
+  napBulb?: boolean;
+
+  // Équipements de la chambre (liste libre : propositions + ajouts de l'hôte).
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(40)
+  @IsString({ each: true })
+  @MinLength(2, { each: true })
+  @MaxLength(60, { each: true })
+  equipments?: string[];
 }

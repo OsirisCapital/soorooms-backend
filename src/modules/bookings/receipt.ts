@@ -21,6 +21,10 @@ export type Receipt = {
   stayTerm: string | null;
   /** Réservation de groupe : nombre de chambres réservées ensemble. */
   units: number;
+  /** Sieste : heure de début et durée (null pour un séjour). */
+  nap: { startHour: number; hours: number } | null;
+  /** Extras payants choisis (navette, petit-déjeuner…), déjà compris dans le prix du séjour. */
+  extras: { id: string; name: string; price: number; perNight: boolean }[];
   /** Paiement en deux temps (salle de fêtes) : ce qu'il reste à payer (0 si tout est réglé) et son échéance. */
   balanceDue: number;
   balanceDueAt: Date | null;

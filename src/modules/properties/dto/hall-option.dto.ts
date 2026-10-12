@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsNumber, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateHallOptionDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -12,4 +12,8 @@ export class CreateHallOptionDto {
   @Min(0)
   @Max(99_999_999)
   price!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  perNight?: boolean;
 }

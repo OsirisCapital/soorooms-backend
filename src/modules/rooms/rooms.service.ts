@@ -25,7 +25,39 @@ export class RoomsService {
 
   async create(propertyId: string, dto: CreateRoomDto) {
     await this.assertForfaitsForResidence(propertyId, dto);
-    return this.prisma.room.create({ data: { propertyId, ...dto }, include: WITH_PHOTOS });
+    await this.assertNapSettings(propertyId, dto);
+    return this.prisma.room.create({ data: { propertyId, ...this.cleanRoomData(dto) }, include: WITH_PHOTOS });
+  }
+
+  /** Équipements : espaces superflus retirés, doublons ignorés (sans tenir compte de la casse). */
+  private cleanRoomData<T extends { equipments?: string[] }>(dto: T): T {
+    if (!dto.equipments) return dto;
+    const seen = new Set<string>();
+    const equipments = dto.equipments
+      .map((e) => e.replace(/\s+/g, ' ').trim())
+      .filter((e) => {
+        const key = e.toLowerCase();
+        if (e.length < 2 || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    return { ...dto, equipments };
+  }
+
+  /** Siestes : réservées aux hôtels et auberges, avec un tarif ; sinon les réglages de sieste sont sans objet. */
+  private async assertNapSettings(
+    propertyId: string,
+    dto: { allowsNap?: boolean; napPrice?: number | null; napHours?: number | null },
+    existing?: { allowsNap: boolean; napPrice: unknown },
+  ) {
+    const allows = dto.allowsNap !== undefined ? dto.allowsNap : (existing?.allowsNap ?? false);
+    if (!allows) return;
+    const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { propertyType: true } });
+    if (property?.propertyType !== 'HOTEL' && property?.propertyType !== 'HOSTEL') {
+      throw new BadRequestException('Les siestes sont proposées par les hôtels et les auberges uniquement.');
+    }
+    const price = dto.napPrice !== undefined ? dto.napPrice : (existing?.napPrice ?? null);
+    if (price == null) throw new BadRequestException('Indiquez le prix de la sieste.');
   }
 
   /** Une résidence étudiante se loue au forfait : au moins le semestre ou l'année doit avoir un prix. */
@@ -45,8 +77,15 @@ export class RoomsService {
       const current = await this.prisma.room.findUnique({ where: { id: roomId }, select: { semesterPrice: true, yearPrice: true } });
       await this.assertForfaitsForResidence(propertyId, dto, current ?? undefined);
     }
+    if (dto.allowsNap !== undefined || dto.napPrice !== undefined) {
+      const current = await this.prisma.room.findUnique({ where: { id: roomId }, select: { allowsNap: true, napPrice: true } });
+      await this.assertNapSettings(propertyId, dto, current ?? undefined);
+    }
     if (dto.unitCount !== undefined) await this.assertEnoughUnitsForBookings(roomId, dto.unitCount);
-    return this.prisma.room.update({ where: { id: roomId }, data: dto, include: WITH_PHOTOS });
+    const data = this.cleanRoomData(dto);
+    // Sieste désactivée : on range les réglages pour ne pas laisser un tarif fantôme.
+    if (data.allowsNap === false) Object.assign(data, { napPrice: null, napHours: null, napBulb: false });
+    return this.prisma.room.update({ where: { id: roomId }, data, include: WITH_PHOTOS });
   }
 
   /** Baisser le nombre d'unités sous ce que les réservations à venir occupent déjà créerait des doubles réservations. */
@@ -54,7 +93,7 @@ export class RoomsService {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const upcoming = await this.prisma.booking.findMany({
-      where: { roomId, status: { in: [...BLOCKING_STATUSES] }, checkOutDate: { gt: today } },
+      where: { roomId, status: { in: [...BLOCKING_STATUSES] }, checkOutDate: { gt: today }, napStartHour: null },
       select: { checkInDate: true, checkOutDate: true, units: true },
     });
     if (upcoming.length === 0) return;

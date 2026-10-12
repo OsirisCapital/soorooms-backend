@@ -36,6 +36,7 @@ enum PropertyType {
   GUEST_HOUSE
   EVENT_HALL
   STUDENT_RESIDENCE
+  HOSTEL
 }
 
 enum PropertyStatus {
@@ -364,6 +365,14 @@ model Room {
   // Résidence étudiante : forfaits (FCFA) au semestre et à l'année ; null = forfait non proposé.
   semesterPrice Decimal?       @db.Decimal(10, 2)
   yearPrice     Decimal?       @db.Decimal(10, 2)
+  // Sieste (séjour de quelques heures) : la chambre l'accepte-t-elle, à quel prix, pour combien d'heures.
+  // napBulb : l'« ampoule » réglée par l'hôte à la création (allumée / éteinte), filtrable à la recherche.
+  allowsNap     Boolean        @default(false)
+  napPrice      Decimal?       @db.Decimal(10, 2)
+  napHours      Int?
+  napBulb       Boolean        @default(false)
+  // Équipements de la chambre (liste libre, l'hôte peut en ajouter).
+  equipments    String[]       @default([])
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -432,6 +441,12 @@ model Booking {
   units          Int           @default(1)
   // Lien de paiement pour un proche (diaspora) : jeton secret, null tant qu'aucun lien n'a été créé.
   payToken       String?       @unique
+  // Extras payants choisis (copie figée : nom, prix, facturation par nuit). Null si aucun.
+  extras         Json?
+  // Sieste : heure de début (0-23) et durée en heures. Null pour un séjour. Une sieste occupe la chambre
+  // quelques heures d'une seule date (checkOutDate = lendemain), jamais la nuit : voir rooms/nap.utils.ts.
+  napStartHour   Int?
+  napHours       Int?
   depositPercent Int?
   balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
@@ -864,6 +879,8 @@ model HallOption {
   property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   name        String
   price       Decimal  @db.Decimal(10, 2)
+  // Facturé chaque nuit (petit-déjeuner…) plutôt qu'une seule fois (navette…).
+  perNight    Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   @@index([propertyId])

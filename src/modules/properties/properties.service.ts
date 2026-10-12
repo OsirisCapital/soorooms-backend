@@ -13,6 +13,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import type { CollaboratorRole } from '../../prisma/client.js';
+import { DEFAULT_COUNTRY, SUPPORTED_COUNTRIES, findCountry } from '../../common/utils/countries.js';
 import { COLLABORATOR_ROLE_LABEL } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
@@ -39,6 +40,7 @@ export class PropertiesService {
     return this.prisma.property.create({
       data: {
         ...dto,
+        country: this.countryOf(dto.country) ?? DEFAULT_COUNTRY,
         // status: PENDING_KYC par défaut (voir schema.prisma) — la fiche
         // existe et est éditable tout de suite, seule sa PUBLICATION est
         // bloquée tant que le KYC du MANAGER n'est pas approuvé.
@@ -51,6 +53,18 @@ export class PropertiesService {
       },
       include: { collaborators: true, amenities: true, photos: true },
     });
+  }
+
+  /** Nom canonique du pays, ou erreur claire s'il n'est pas (encore) pris en charge. Undefined si absent. */
+  private countryOf(input: string | undefined): string | undefined {
+    if (input === undefined || input.trim() === '') return undefined;
+    const country = findCountry(input);
+    if (!country) {
+      throw new BadRequestException(
+        `Pays non pris en charge pour l'instant : ${SUPPORTED_COUNTRIES.map((c) => c.name).join(', ')}.`,
+      );
+    }
+    return country.name;
   }
 
   async listMine(userId: string) {
@@ -79,7 +93,8 @@ export class PropertiesService {
   // ---------------------------------------------------------------------
 
   async update(propertyId: string, dto: UpdatePropertyDto) {
-    return this.prisma.property.update({ where: { id: propertyId }, data: dto });
+    const country = dto.country !== undefined ? this.countryOf(dto.country) : undefined;
+    return this.prisma.property.update({ where: { id: propertyId }, data: { ...dto, ...(country ? { country } : {}) } });
   }
 
   // Options payantes d'une salle de fêtes (sono, traiteur…). Les réservations en gardent une copie figée.
@@ -89,12 +104,15 @@ export class PropertiesService {
 
   async addHallOption(propertyId: string, dto: CreateHallOptionDto) {
     const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { propertyType: true } });
-    if (property?.propertyType !== 'EVENT_HALL') {
-      throw new BadRequestException('Les options ne concernent que les salles de fêtes.');
+    // Une résidence étudiante se loue au forfait (6 ou 12 mois) : pas d'extras facturés à la nuit.
+    if (property?.propertyType === 'STUDENT_RESIDENCE') {
+      throw new BadRequestException('Les options ne sont pas proposées pour une résidence étudiante.');
     }
     const count = await this.prisma.hallOption.count({ where: { propertyId } });
-    if (count >= 30) throw new BadRequestException('30 options au maximum par salle.');
-    return this.prisma.hallOption.create({ data: { propertyId, name: dto.name, price: dto.price } });
+    if (count >= 30) throw new BadRequestException('30 options au maximum par logement.');
+    // Une salle n'est louée que pour une date : la facturation « par nuit » n'y a pas de sens.
+    const perNight = property?.propertyType === 'EVENT_HALL' ? false : (dto.perNight ?? false);
+    return this.prisma.hallOption.create({ data: { propertyId, name: dto.name, price: dto.price, perNight } });
   }
 
   async removeHallOption(propertyId: string, optionId: string) {

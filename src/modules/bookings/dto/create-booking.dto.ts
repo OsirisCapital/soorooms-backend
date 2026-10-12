@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min, MinLength } from 'class-validator';
 import { EVENT_SLOTS, type EventSlot } from '../event.utils.js';
 import { STAY_TERMS, type StayTerm } from '../stay-term.utils.js';
 
@@ -48,6 +48,17 @@ export class CreateBookingDto {
   @IsOptional()
   @IsIn(STAY_TERMS)
   stayTerm?: StayTerm;
+
+  // Sieste (hôtels et auberges) : séjour de quelques heures le jour d'arrivée, à partir de `napStartHour`.
+  @IsOptional()
+  @IsBoolean()
+  nap?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  napStartHour?: number;
 
   // Salle de fêtes uniquement.
   @IsOptional()
