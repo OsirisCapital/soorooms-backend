@@ -38,6 +38,9 @@ export type NotificationPayloads = {
   DISPUTE_OPENED: { bookingId: string; audience: Audience };
   DISPUTE_RESOLVED: { bookingId: string; audience: Audience; propertyTitle: string; decision: 'REFUND_FULL' | 'REFUND_PARTIAL' | 'PAY_HOST'; refundAmount: number; note: string };
   DISPUTE_OPENED_STAFF: { bookingId: string }; // → équipe
+  REVIEW_RECEIVED: { propertyId: string; propertyTitle: string; rating: number }; // → hôte
+  REVIEW_REPLIED: { propertyTitle: string }; // → voyageur
+  ERROR_ALERT_STAFF: { message: string; path: string; count: number; reopened: boolean }; // → équipe (audit.view)
   ARRIVAL_REMINDER: { bookingId: string; audience: Audience; propertyTitle: string; when: string; otherName?: string }; // la veille de l'arrivée
   // Logements
   PROPERTY_PUBLISHED: { propertyId: string; propertyTitle: string };
@@ -244,6 +247,21 @@ const RENDERERS: Renderers = {
     title: 'Remboursement en échec',
     body: `Le remboursement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » a échoué. Ouvrez la file pour réessayer.`,
     linkUrl: '/admin/remboursements',
+  }),
+  REVIEW_RECEIVED: (p) => ({
+    title: `Nouvel avis ${'★'.repeat(p.rating)}`,
+    body: `Un voyageur a noté « ${clip(p.propertyTitle)} » ${p.rating}/5. Vous pouvez lui répondre publiquement.`,
+    linkUrl: `/hote/logements/${p.propertyId}/avis`,
+  }),
+  REVIEW_REPLIED: (p) => ({
+    title: 'Réponse à votre avis',
+    body: `L'hôte de « ${clip(p.propertyTitle)} » a répondu à votre avis.`,
+    linkUrl: '/profil/avis',
+  }),
+  ERROR_ALERT_STAFF: (p) => ({
+    title: p.reopened ? 'Erreur serveur revenue ⚠️' : p.count > 1 ? `Erreur serveur répétée (${p.count} fois) ⚠️` : 'Nouvelle erreur serveur ⚠️',
+    body: `${clip(p.path, 80)} : ${clip(p.message, 140)}`,
+    linkUrl: '/admin/erreurs',
   }),
   ARRIVAL_REMINDER: (p) => ({
     title: 'Arrivée bientôt 🏠',

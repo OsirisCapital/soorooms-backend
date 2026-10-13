@@ -514,7 +514,7 @@ model Booking {
 
   offers        PriceOffer[]
   escrowVault   EscrowVault?
-  reviews       Review[]
+  review        Review?
   messages      Message[]
   conversationReads ConversationRead[]
 }
@@ -723,7 +723,31 @@ model Review {
   author    User     @relation(fields: [authorId], references: [id])
   rating    Int      // De 1 à 5
   comment   String?
+  /// Réponse publique de l'hôte (une seule, modifiable).
+  hostReply     String?
+  hostRepliedAt DateTime?
   createdAt DateTime @default(now())
+
+  @@unique([bookingId])
+  @@index([createdAt])
+}
+
+/// Erreur serveur (5xx) regroupée par empreinte : une ligne par problème, avec son nombre d'occurrences.
+model ErrorEvent {
+  id          String    @id @default(uuid())
+  fingerprint String    @unique
+  method      String
+  path        String
+  status      Int
+  message     String
+  stack       String?
+  count       Int       @default(1)
+  lastUserId  String?
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([resolvedAt, lastSeenAt])
 }
 
 model Message {

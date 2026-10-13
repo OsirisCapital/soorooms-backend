@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
+import { MonitoringService } from './modules/monitoring/monitoring.service.js';
 import { PrismaService } from './prisma/prisma.service.js';
 
 async function bootstrap() {
@@ -32,7 +33,12 @@ async function bootstrap() {
     }),
   );
 
-  app.useGlobalFilters(new HttpExceptionFilter());
+  const monitoring = app.get(MonitoringService);
+  app.useGlobalFilters(new HttpExceptionFilter(monitoring));
+  // Une promesse rejetée sans personne pour l'attraper plantait le serveur sans trace : on la garde dans le journal des erreurs.
+  process.on('unhandledRejection', (reason) => {
+    void monitoring.report({ method: 'PROCESS', path: 'unhandledRejection', status: 500, error: reason });
+  });
   app.useGlobalInterceptors(new TransformInterceptor());
 
   const prismaService = app.get(PrismaService);

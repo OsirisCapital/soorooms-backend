@@ -5,10 +5,14 @@
  */
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import type { MonitoringService } from '../../modules/monitoring/monitoring.service.js';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
+
+  /** Le service de surveillance est facultatif : sans lui (tests), le filtre se comporte comme avant. */
+  constructor(private readonly monitoring?: MonitoringService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -22,6 +26,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (!isHttpException) {
       // La vraie erreur est loguée côté serveur, jamais renvoyée au client.
       this.logger.error(exception);
+    }
+
+    // Toute erreur serveur (5xx) est enregistrée pour l'équipe, sans attendre et sans jamais faire échouer la réponse.
+    if (status >= 500) {
+      const userId = (request as Request & { user?: { id?: string } }).user?.id ?? null;
+      void this.monitoring?.report({ method: request.method, path: request.originalUrl ?? request.url, status, error: exception, userId });
     }
 
     response.status(status).json({

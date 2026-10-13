@@ -92,6 +92,7 @@ describe('NotificationEmailService.sendFor', () => {
       DISPUTE_OPENED: { bookingId: 'b', audience: 'host' }, PROPERTY_PUBLISHED: { propertyId: 'p', propertyTitle: 'P' },
       PROPERTY_SUSPENDED: { propertyId: 'p', propertyTitle: 'P' }, SUPPORT_REPLY: { ticketId: 't', number: 1 },
       SUPPORT_TICKET_RESOLVED: { ticketId: 't', number: 1 }, STAFF_ACCESS_CHANGED: { roleLabel: null }, MESSAGE_RECEIVED: { fromName: 'F' },
+      REVIEW_RECEIVED: { propertyId: 'p', propertyTitle: 'P', rating: 5 }, ERROR_ALERT_STAFF: { message: 'm', path: '/x', count: 1, reopened: false },
     } as const;
     expect(Object.keys(samples).sort()).toEqual([...EMAIL_NOTIFICATION_TYPES].sort());
     for (const [type, payload] of Object.entries(samples)) {

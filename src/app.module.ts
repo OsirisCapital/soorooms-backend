@@ -28,6 +28,8 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
 import { PropertiesModule } from './modules/properties/properties.module.js';
 import { RoomsModule } from './modules/rooms/rooms.module.js';
 import { SearchModule } from './modules/search/search.module.js';
+import { MonitoringModule } from './modules/monitoring/monitoring.module.js';
+import { ReviewsModule } from './modules/reviews/reviews.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { SupportModule } from './modules/support/support.module.js';
@@ -68,7 +70,9 @@ import { MessagesModule } from './modules/messages/messages.module.js';
     AnnouncementsModule,
     ReleasesModule,
     StaffModule,
-    ProfileModule
+    ProfileModule,
+    ReviewsModule,
+    MonitoringModule,
   ],
   controllers: [AppController],
   providers: [

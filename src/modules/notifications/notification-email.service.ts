@@ -38,6 +38,8 @@ export const EMAIL_NOTIFICATION_TYPES: ReadonlySet<NotificationType> = new Set<N
   'SUPPORT_TICKET_RESOLVED',
   'STAFF_ACCESS_CHANGED',
   'MESSAGE_RECEIVED',
+  'REVIEW_RECEIVED',
+  'ERROR_ALERT_STAFF',
 ]);
 
 @Injectable()
