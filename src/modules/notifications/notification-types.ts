@@ -36,6 +36,7 @@ export type NotificationPayloads = {
   REFUND_FAILED_STAFF: { amount: number; propertyTitle: string }; // → finance
   REFUND_SENT: { bookingId: string; amount: number; propertyTitle: string }; // → voyageur
   DISPUTE_OPENED: { bookingId: string; audience: Audience };
+  DISPUTE_RESOLVED: { bookingId: string; audience: Audience; propertyTitle: string; decision: 'REFUND_FULL' | 'REFUND_PARTIAL' | 'PAY_HOST'; refundAmount: number; note: string };
   DISPUTE_OPENED_STAFF: { bookingId: string }; // → équipe
   // Logements
   PROPERTY_PUBLISHED: { propertyId: string; propertyTitle: string };
@@ -247,6 +248,18 @@ const RENDERERS: Renderers = {
     title: 'Remboursement envoyé 💸',
     body: `${fcfa(p.amount)} ont été envoyés sur votre compte Mobile Money pour « ${clip(p.propertyTitle)} ».`,
     linkUrl: bookingLink('traveler', p.bookingId),
+  }),
+  DISPUTE_RESOLVED: (p) => ({
+    title: 'Litige résolu',
+    body:
+      p.decision === 'PAY_HOST'
+        ? p.audience === 'host'
+          ? `Le litige sur « ${clip(p.propertyTitle)} » est tranché en votre faveur : votre versement est en préparation. Motif : ${clip(p.note, 160)}`
+          : `Le litige sur « ${clip(p.propertyTitle)} » est clos : le séjour est considéré comme conforme et l'hôte est payé. Motif : ${clip(p.note, 160)}`
+        : p.audience === 'host'
+          ? `Le litige sur « ${clip(p.propertyTitle)} » est tranché : ${fcfa(p.refundAmount)} sont remboursés au voyageur${p.decision === 'REFUND_PARTIAL' ? ', le reste vous revient' : ''}. Motif : ${clip(p.note, 160)}`
+          : `Le litige sur « ${clip(p.propertyTitle)} » est tranché en votre faveur : ${fcfa(p.refundAmount)} vous seront remboursés. Indiquez votre numéro Mobile Money sur la réservation. Motif : ${clip(p.note, 160)}`,
+    linkUrl: bookingLink(p.audience, p.bookingId),
   }),
   DISPUTE_OPENED: (p) => ({
     title: 'Un litige a été ouvert',

@@ -5,11 +5,13 @@ import { AttestationsController, PublicAttestationsController } from './attestat
 import { AttestationsService } from './attestations.service.js';
 import { BookingsController } from './bookings.controller.js';
 import { BookingsService } from './bookings.service.js';
+import { AdminDisputesController } from './admin-disputes.controller.js';
+import { DisputesService } from './disputes.service.js';
 
 @Module({
   imports: [PaymentsModule, LoyaltyModule],
-  controllers: [BookingsController, AttestationsController, PublicAttestationsController],
-  providers: [BookingsService, AttestationsService],
+  controllers: [BookingsController, AttestationsController, PublicAttestationsController, AdminDisputesController],
+  providers: [BookingsService, AttestationsService, DisputesService],
   exports: [BookingsService],
 })
 export class BookingsModule {}

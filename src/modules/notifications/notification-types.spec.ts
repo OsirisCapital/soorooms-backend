@@ -103,6 +103,7 @@ describe('renderNotification', () => {
       REFUND_FAILED_STAFF: { amount: 1, propertyTitle: 'P' },
       REFUND_SENT: { bookingId: 'b', amount: 1, propertyTitle: 'P' },
       DISPUTE_OPENED: { bookingId: 'b', audience: 'traveler' },
+      DISPUTE_RESOLVED: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P', decision: 'REFUND_PARTIAL', refundAmount: 1, note: 'Photos reçues' },
       DISPUTE_OPENED_STAFF: { bookingId: 'b' },
       PROPERTY_PUBLISHED: { propertyId: 'p', propertyTitle: 'P' },
       PROPERTY_SUSPENDED: { propertyId: 'p', propertyTitle: 'P' },

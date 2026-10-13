@@ -115,3 +115,17 @@ export function decideRefund(input: RefundInput): RefundDecision {
   const host = stay > 0 ? Math.min(Math.round((retainedStay * hostPayout) / stay), retained) : 0;
   return { allowed: true, refund, retained, hostPayout: host, travelerFeeKept, percent: paid > 0 ? Math.round((refund / paid) * 100) : 0, label };
 }
+
+/**
+ * Partage d'un séquestre quand l'équipe tranche un litige : `refund` revient au voyageur, le reste est
+ * conservé et réparti entre l'hôte et la plateforme, au prorata des parts d'origine.
+ */
+export function splitForRefund(input: { paid: number; hostPayout: number; travelerFee: number; refund: number }) {
+  const { paid, refund } = input;
+  const retained = Math.max(paid - refund, 0);
+  if (paid <= 0 || retained === 0) return { retained, hostPayout: 0, travelerFeeKept: 0 };
+  const ratio = retained / paid;
+  const hostPayout = Math.min(Math.round(input.hostPayout * ratio), retained);
+  const travelerFeeKept = Math.min(Math.round(input.travelerFee * ratio), retained - hostPayout);
+  return { retained, hostPayout, travelerFeeKept };
+}
