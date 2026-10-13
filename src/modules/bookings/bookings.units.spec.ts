@@ -9,10 +9,12 @@ const stay = { checkInDate: new Date('2099-01-09'), checkOutDate: new Date('2099
 
 function setup(unitCount: number, stays: unknown[]) {
   const tx = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     booking: { create: vi.fn().mockResolvedValue({ id: 'b1' }) },
     priceOffer: { create: vi.fn() },
   };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     room: {
       findUnique: vi.fn().mockResolvedValue({
         id: 'room-1',

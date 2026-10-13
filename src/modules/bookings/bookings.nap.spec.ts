@@ -9,6 +9,7 @@ type Row = { checkInDate: Date; checkOutDate: Date; units?: number; napStartHour
 function setup(opts: { room?: Record<string, unknown>; existing?: Row[]; type?: string } = {}) {
   const tx = { booking: { create: vi.fn().mockResolvedValue({ id: 'b1' }) }, priceOffer: { create: vi.fn() } };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     room: {
       findUnique: vi.fn().mockResolvedValue({
         id: 'room-1', propertyId: 'p1', basePrice: 20000, unitCount: 1, maxGuests: 2,

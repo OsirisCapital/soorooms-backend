@@ -86,6 +86,18 @@ export class SearchRoomsQueryDto {
   @IsBoolean()
   hasParking?: boolean;
 
+  // Mode sieste : ne garde que les chambres qui acceptent les siestes (prix = tarif de sieste).
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  nap?: boolean;
+
+  // Mode sieste : ampoule allumée (true) ou éteinte (false).
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  napBulb?: boolean;
+
   // « price » (défaut) : moins cher d'abord ; « verified » : logements vérifiés sur place en tête.
   @IsOptional()
   @IsIn(['price', 'verified'])

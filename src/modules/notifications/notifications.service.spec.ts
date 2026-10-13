@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationEmailService } from './notification-email.service.js';
+import type { NotificationWhatsappService } from './notification-whatsapp.service.js';
 import { NotificationsService } from './notifications.service.js';
 
 function make(overrides: Record<string, unknown> = {}) {
@@ -14,8 +15,9 @@ function make(overrides: Record<string, unknown> = {}) {
   };
   const user = { findMany: vi.fn().mockResolvedValue([]) };
   const emails = { sendFor: vi.fn().mockResolvedValue(undefined) };
+  const whatsapp = { sendFor: vi.fn().mockResolvedValue(undefined) };
   const prisma = { notification, user, ...overrides };
-  return { service: new NotificationsService(prisma as unknown as PrismaService, emails as unknown as NotificationEmailService), notification, user, emails };
+  return { service: new NotificationsService(prisma as unknown as PrismaService, emails as unknown as NotificationEmailService, whatsapp as unknown as NotificationWhatsappService), notification, user, emails, whatsapp };
 }
 
 beforeEach(() => {
@@ -69,17 +71,41 @@ describe('NotificationsService — préférences', () => {
   it("lit l'interrupteur et dit si l'adresse est vérifiée", async () => {
     const { service, user } = make();
     Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: false, email: 'a@b.c', emailVerifiedAt: new Date() }) });
-    expect(await service.getPreferences('u1')).toEqual({ emailEnabled: false, emailVerified: true });
+    expect(await service.getPreferences('u1')).toMatchObject({ emailEnabled: false, emailVerified: true });
     Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: true, email: 'a@b.c', emailVerifiedAt: null }) });
-    expect(await service.getPreferences('u1')).toEqual({ emailEnabled: true, emailVerified: false });
+    expect(await service.getPreferences('u1')).toMatchObject({ emailEnabled: true, emailVerified: false });
   });
 
   it("ne modifie que le compte de la personne connectée", async () => {
     const { service, user } = make();
     const update = vi.fn().mockResolvedValue({});
     Object.assign(user, { update, findUnique: vi.fn().mockResolvedValue({ emailNotifications: false, email: null, emailVerifiedAt: null }) });
-    await service.setEmailEnabled('u1', false);
+    await service.setPreferences('u1', { emailEnabled: false });
     expect(update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { emailNotifications: false } });
+  });
+});
+
+describe('préférences WhatsApp', () => {
+  it('signale un compte sans vrai numéro (Google) comme non joignable', async () => {
+    const { service, user } = make();
+    Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: true, email: null, emailVerifiedAt: null, whatsappNotifications: true, phone: 'google:123' }) });
+    expect(await service.getPreferences('u1')).toMatchObject({ whatsappEnabled: true, whatsappAvailable: false });
+    Object.assign(user, { findUnique: vi.fn().mockResolvedValue({ emailNotifications: true, email: null, emailVerifiedAt: null, whatsappNotifications: false, phone: '+237670000000' }) });
+    expect(await service.getPreferences('u1')).toMatchObject({ whatsappEnabled: false, whatsappAvailable: true });
+  });
+
+  it("ne change que le réglage envoyé", async () => {
+    const { service, user } = make();
+    const update = vi.fn().mockResolvedValue({});
+    Object.assign(user, { update, findUnique: vi.fn().mockResolvedValue({ phone: '+237670000000' }) });
+    await service.setPreferences('u1', { whatsappEnabled: false });
+    expect(update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { whatsappNotifications: false } });
+  });
+
+  it('notify déclenche aussi le canal WhatsApp sans l\'attendre', async () => {
+    const { service, whatsapp } = make();
+    await service.notify('u1', 'KYC_APPROVED', {});
+    expect(whatsapp.sendFor).toHaveBeenCalledWith(['u1'], 'KYC_APPROVED', expect.objectContaining({ title: expect.any(String) }));
   });
 });
 

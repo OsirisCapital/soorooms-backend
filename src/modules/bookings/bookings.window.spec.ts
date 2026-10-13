@@ -22,10 +22,12 @@ function setup(opts: { openCount?: number; offerAgeMs?: number } = {}) {
   };
   const stale = (opts.offerAgeMs ?? 0) >= 2 * 3_600_000;
   const tx = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     priceOffer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), create: vi.fn() },
     booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), create: vi.fn().mockResolvedValue({ id: 'b1' }) },
   };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     escrowVault: { findUnique: vi.fn().mockResolvedValue(null) },
     room: { findUnique: vi.fn().mockResolvedValue({ id: 'room-1', basePrice: 1000, unitCount: 1, property }) },
     booking: {

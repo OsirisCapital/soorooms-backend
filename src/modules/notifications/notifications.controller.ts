@@ -37,7 +37,7 @@ export class NotificationsController {
 
   @Patch('preferences')
   setPreferences(@CurrentUser() user: AuthenticatedUser, @Body() dto: SetPreferencesDto) {
-    return this.notifications.setEmailEnabled(user.id, dto.emailEnabled);
+    return this.notifications.setPreferences(user.id, dto);
   }
 
   @HttpCode(HttpStatus.OK)

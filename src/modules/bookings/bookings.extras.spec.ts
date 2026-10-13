@@ -16,6 +16,7 @@ const OPTIONS = [
 function setup(type = 'HOTEL', options: unknown[] = OPTIONS) {
   const tx = { booking: { create: vi.fn().mockResolvedValue({ id: 'b1' }) }, priceOffer: { create: vi.fn() } };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     room: {
       findUnique: vi.fn().mockResolvedValue({
         id: 'room-1', propertyId: 'p1', basePrice: 20000, unitCount: 5, maxGuests: 2, semesterPrice: 1, yearPrice: 1,

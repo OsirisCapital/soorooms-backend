@@ -22,6 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import type { NotificationPayloads, NotificationType } from '../notifications/notification-types.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { blockAsStay, blockedUnitsOn } from '../rooms/blocks.utils.js';
 import { currentHourWat, napFits, NAP_MAX_HOURS, stayFitsHourly } from '../rooms/nap.utils.js';
 import { forfeitedAmounts, HALL_DEPOSIT_PERCENT, nextStage } from '../payments/deposit.utils.js';
 import { extrasTotal, type ExtraSnapshot } from './extras.utils.js';
@@ -867,11 +868,17 @@ export class BookingsService {
     checkInDate: Date,
     checkOutDate: Date,
     excludeBookingId?: string,
-    db: Pick<PrismaService, 'booking' | 'room'> = this.prisma,
+    db: Pick<PrismaService, 'booking' | 'room' | 'roomBlock'> = this.prisma,
     units = 1,
     nap?: { startHour: number; hours: number },
   ) {
     const room = await db.room.findUnique({ where: { id: roomId }, select: { unitCount: true } });
+    // Dates fermées par l'hôte : elles comptent comme des séjours (voir rooms/blocks.utils.ts).
+    const blocks = await db.roomBlock.findMany({
+      where: { roomId, startDate: { lt: nap ? new Date(checkInDate.getTime() + 24 * 3_600_000) : checkOutDate }, endDate: { gt: checkInDate } },
+      select: { startDate: true, endDate: true, units: true },
+    });
+    const unitCount = room?.unitCount ?? 1;
     // Sieste : contrôle heure par heure contre les séjours de la veille, du jour et du lendemain, et les autres siestes.
     if (nap) {
       const around = await db.booking.findMany({
@@ -884,7 +891,7 @@ export class BookingsService {
         },
         select: { checkInDate: true, checkOutDate: true, units: true, napStartHour: true, napHours: true },
       });
-      if (!napFits(room?.unitCount ?? 1, around, checkInDate, nap.startHour, nap.hours)) {
+      if (!napFits(unitCount - blockedUnitsOn(blocks, checkInDate, unitCount), around, checkInDate, nap.startHour, nap.hours)) {
         throw new ConflictException("Cette chambre n'est pas libre sur ce créneau. Choisissez une autre heure ou une autre chambre.");
       }
       return;
@@ -900,8 +907,8 @@ export class BookingsService {
       },
       select: { checkInDate: true, checkOutDate: true, units: true, napStartHour: true },
     });
-    const stays = staysRaw.filter((b) => b.napStartHour == null);
-    const left = unitsLeft(room?.unitCount ?? 1, stays, checkInDate, checkOutDate);
+    const stays = [...staysRaw.filter((b) => b.napStartHour == null), ...blocks.map((b) => blockAsStay(b, unitCount))];
+    const left = unitsLeft(unitCount, stays, checkInDate, checkOutDate);
     if (left < units) {
       throw new ConflictException(
         left < 1

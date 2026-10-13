@@ -38,6 +38,7 @@ export type NotificationPayloads = {
   DISPUTE_OPENED: { bookingId: string; audience: Audience };
   DISPUTE_RESOLVED: { bookingId: string; audience: Audience; propertyTitle: string; decision: 'REFUND_FULL' | 'REFUND_PARTIAL' | 'PAY_HOST'; refundAmount: number; note: string };
   DISPUTE_OPENED_STAFF: { bookingId: string }; // → équipe
+  ARRIVAL_REMINDER: { bookingId: string; audience: Audience; propertyTitle: string; when: string; otherName?: string }; // la veille de l'arrivée
   // Logements
   PROPERTY_PUBLISHED: { propertyId: string; propertyTitle: string };
   PROPERTY_SUSPENDED: { propertyId: string; propertyTitle: string };
@@ -243,6 +244,14 @@ const RENDERERS: Renderers = {
     title: 'Remboursement en échec',
     body: `Le remboursement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » a échoué. Ouvrez la file pour réessayer.`,
     linkUrl: '/admin/remboursements',
+  }),
+  ARRIVAL_REMINDER: (p) => ({
+    title: 'Arrivée bientôt 🏠',
+    body:
+      p.audience === 'host'
+        ? `${clip(p.otherName ?? 'Votre voyageur')} arrive ${p.when} à « ${clip(p.propertyTitle)} ». Préparez l'accueil.`
+        : `Votre séjour à « ${clip(p.propertyTitle)} » commence ${p.when}. Bon voyage ! Retrouvez les détails de votre réservation dans l'application.`,
+    linkUrl: bookingLink(p.audience, p.bookingId),
   }),
   REFUND_SENT: (p) => ({
     title: 'Remboursement envoyé 💸',

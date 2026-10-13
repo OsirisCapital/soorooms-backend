@@ -26,6 +26,7 @@ function context(over: Record<string, unknown> = {}) {
 
 function make(booking = context(), opts: { releasedCount?: number; later?: Record<string, unknown> } = {}) {
   const tx = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     $queryRaw: vi.fn(),
     booking: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0), updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn().mockResolvedValue({ id: 'b1' }) },
@@ -33,6 +34,7 @@ function make(booking = context(), opts: { releasedCount?: number; later?: Recor
     priceOffer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), create: vi.fn() },
   };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     escrowVault: { findUnique: vi.fn().mockResolvedValue(null) },
     booking: {
       findUnique: vi.fn().mockImplementation(async () => booking),

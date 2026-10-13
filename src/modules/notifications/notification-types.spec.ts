@@ -105,6 +105,7 @@ describe('renderNotification', () => {
       DISPUTE_OPENED: { bookingId: 'b', audience: 'traveler' },
       DISPUTE_RESOLVED: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P', decision: 'REFUND_PARTIAL', refundAmount: 1, note: 'Photos reçues' },
       DISPUTE_OPENED_STAFF: { bookingId: 'b' },
+      ARRIVAL_REMINDER: { bookingId: 'b', audience: 'traveler', propertyTitle: 'P', when: 'demain à 14 h' },
       PROPERTY_PUBLISHED: { propertyId: 'p', propertyTitle: 'P' },
       PROPERTY_SUSPENDED: { propertyId: 'p', propertyTitle: 'P' },
       SUPPORT_TICKET_NEW: { ticketId: 't', number: 42, subject: 'Aide' },

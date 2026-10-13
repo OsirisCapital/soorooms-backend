@@ -144,6 +144,8 @@ model User {
   kycStatus     KycStatus @default(NOT_SUBMITTED)
   avatarUrl     String?
   emailNotifications Boolean @default(true)
+  // Messages WhatsApp pour les événements importants (réservation, paiement, rappel d'arrivée…).
+  whatsappNotifications Boolean @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -377,8 +379,39 @@ model Room {
   updatedAt     DateTime       @updatedAt
 
   availabilities Availability[]
+  blocks         RoomBlock[]
   bookings       Booking[]
   photos         RoomPhoto[]
+}
+
+/// Dates fermées à la réservation par l'hôte (travaux, séjour hors plateforme…). `endDate` est le jour de
+/// reprise (exclu), comme un départ : les nuits bloquées sont [startDate, endDate). `units` null = tout le type.
+model RoomBlock {
+  id          String   @id @default(uuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  startDate   DateTime @db.Date
+  endDate     DateTime @db.Date
+  units       Int?
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([roomId, startDate])
+}
+
+/// Numéro WhatsApp du support affiché aux utilisateurs (lien wa.me). Géré par le super administrateur.
+model SupportContact {
+  id        String   @id @default(uuid())
+  label     String
+  /// Format international « +237… ».
+  phone     String
+  /// Horaires affichés, en texte libre (« Lun–Sam, 8 h–18 h »).
+  hours     String?
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// Photo d'un type de chambre. Au moins une par type est exigée pour publier le logement.
@@ -451,6 +484,8 @@ model Booking {
   cancelledAt    DateTime?
   cancelledById  String?
   cancelReason   String?
+  // Rappel d'arrivée déjà envoyé (une seule fois par réservation).
+  arrivalReminderSentAt DateTime?
   depositPercent Int?
   balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).

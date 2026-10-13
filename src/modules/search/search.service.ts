@@ -7,6 +7,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DEFAULT_COUNTRY, findCountry } from '../../common/utils/countries.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BLOCKING_STATUSES, unitsLeft } from '../rooms/availability.utils.js';
+import { blockAsStay } from '../rooms/blocks.utils.js';
 import type { SearchRoomsQueryDto } from './dto/search-rooms.query.dto.js';
 
 // Mêmes statuts que BookingsService pour verrouiller le calendrier (voir availability.utils).
@@ -70,10 +71,17 @@ export class SearchService {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const roomWhere: any = { property: propertyWhere };
+    // Mode sieste : le tarif de référence est celui de la sieste, et l'ampoule peut être imposée.
+    const napMode = query.nap === true;
+    if (napMode) {
+      roomWhere.allowsNap = true;
+      if (query.napBulb !== undefined) roomWhere.napBulb = query.napBulb;
+    }
+    const priceField = napMode ? 'napPrice' : 'basePrice';
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
-      roomWhere.basePrice = {};
-      if (query.minPrice !== undefined) roomWhere.basePrice.gte = query.minPrice;
-      if (query.maxPrice !== undefined) roomWhere.basePrice.lte = query.maxPrice;
+      roomWhere[priceField] = {};
+      if (query.minPrice !== undefined) roomWhere[priceField].gte = query.minPrice;
+      if (query.maxPrice !== undefined) roomWhere[priceField].lte = query.maxPrice;
     }
     if (query.maxGuests !== undefined) {
       roomWhere.maxGuests = { gte: query.maxGuests };
@@ -81,8 +89,8 @@ export class SearchService {
     // « Vérifiés d'abord » : logements vérifiés sur place en tête, puis prix croissant.
     const orderBy =
       query.sort === 'verified'
-        ? [{ property: { isVerifiedByAgent: 'desc' as const } }, { basePrice: 'asc' as const }]
-        : [{ basePrice: 'asc' as const }];
+        ? [{ property: { isVerifiedByAgent: 'desc' as const } }, { [napMode ? 'napPrice' : 'basePrice']: 'asc' as const }]
+        : [{ [napMode ? 'napPrice' : 'basePrice']: 'asc' as const }];
 
     const roomInclude = {
       property: { include: { amenities: true, photos: { orderBy: { position: 'asc' as const } }, collaborators: HOST_KYC } },
@@ -90,7 +98,8 @@ export class SearchService {
     };
 
     // Sans dates : pas de calcul de disponibilité, on affiche le total d'unités.
-    if (!(query.checkInDate && query.checkOutDate)) {
+    // En mode sieste, la disponibilité se vérifie à la réservation (heure par heure).
+    if (napMode || !(query.checkInDate && query.checkOutDate)) {
       const [rooms, total] = await Promise.all([
         this.prisma.room.findMany({
           where: roomWhere,
@@ -116,18 +125,20 @@ export class SearchService {
         bookings: {
           where: {
             status: { in: [...BLOCKING_STATUSES] },
+            napStartHour: null,
             checkInDate: { lt: checkOut },
             checkOutDate: { gt: checkIn },
           },
           select: { checkInDate: true, checkOutDate: true, units: true },
         },
+        blocks: { where: { startDate: { lt: checkOut }, endDate: { gt: checkIn } }, select: { startDate: true, endDate: true, units: true } },
       },
       orderBy,
     });
     const available = candidates
-      .map(({ bookings, ...room }) => ({
+      .map(({ bookings, blocks, ...room }) => ({
         ...withVerification(room),
-        unitsLeft: unitsLeft(room.unitCount, bookings, checkIn, checkOut),
+        unitsLeft: unitsLeft(room.unitCount, [...bookings, ...blocks.map((b) => blockAsStay(b, room.unitCount))], checkIn, checkOut),
       }))
       .filter((r) => r.unitsLeft > 0);
     const results = available.slice((page - 1) * limit, page * limit);
@@ -152,11 +163,16 @@ export class SearchService {
             bookings: {
               where: {
                 status: { in: [...BLOCKING_STATUSES] },
+                napStartHour: null,
                 ...(checkIn && checkOut
                   ? { checkInDate: { lt: checkOut }, checkOutDate: { gt: checkIn } }
                   : { checkOutDate: { gt: new Date() } }),
               },
               select: { checkInDate: true, checkOutDate: true, units: true },
+            },
+            blocks: {
+              where: checkIn && checkOut ? { startDate: { lt: checkOut }, endDate: { gt: checkIn } } : { endDate: { gt: new Date() } },
+              select: { startDate: true, endDate: true, units: true },
             },
           },
         },
@@ -168,13 +184,16 @@ export class SearchService {
     if (!property || property.status !== 'ACTIVE') {
       throw new NotFoundException('Logement introuvable.');
     }
-    const rooms = property.rooms.map(({ bookings, ...room }) => ({
-      ...room,
-      // Sans dates, unitsLeft = unités libres aujourd'hui (sinon sur la période demandée).
-      unitsLeft: checkIn && checkOut
-        ? unitsLeft(room.unitCount, bookings, checkIn, checkOut)
-        : unitsLeft(room.unitCount, bookings, startOfToday(), new Date(startOfToday().getTime() + 24 * 3_600_000)),
-    }));
+    const rooms = property.rooms.map(({ bookings, blocks, ...room }) => {
+      const occupied = [...bookings, ...blocks.map((b) => blockAsStay(b, room.unitCount))];
+      return {
+        ...room,
+        // Sans dates, unitsLeft = unités libres aujourd'hui (sinon sur la période demandée).
+        unitsLeft: checkIn && checkOut
+          ? unitsLeft(room.unitCount, occupied, checkIn, checkOut)
+          : unitsLeft(room.unitCount, occupied, startOfToday(), new Date(startOfToday().getTime() + 24 * 3_600_000)),
+      };
+    });
     return { ...stripCollaborators(property), rooms };
   }
 }

@@ -10,6 +10,7 @@ const DTO = { roomId: 'room-1', checkInDate: '2099-03-06', checkOutDate: '2099-0
 function setup(existing: { checkInDate: Date; checkOutDate: Date; units: number }[] = []) {
   const tx = { booking: { create: vi.fn().mockResolvedValue({ id: 'b1' }) }, priceOffer: { create: vi.fn() } };
   const prisma = {
+    roomBlock: { findMany: vi.fn().mockResolvedValue([]) },
     room: {
       findUnique: vi.fn().mockResolvedValue({
         id: 'room-1', propertyId: 'p1', basePrice: 20000, unitCount: 5, maxGuests: 2,

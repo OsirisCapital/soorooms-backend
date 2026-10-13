@@ -7,6 +7,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { permissionsFor, type Permission } from '../admin/permissions.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationEmailService } from './notification-email.service.js';
+import { NotificationWhatsappService } from './notification-whatsapp.service.js';
+import { toWhatsappNumber } from './whatsapp.service.js';
 import { renderNotification, type NotificationPayloads, type NotificationType } from './notification-types.js';
 
 const MAX_PAGE = 50;
@@ -18,6 +20,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emails: NotificationEmailService,
+    private readonly whatsapp: NotificationWhatsappService,
   ) {}
 
   /** Notifie une personne. Ne lève jamais d'erreur. Renvoie true si la notification est écrite. */
@@ -27,6 +30,7 @@ export class NotificationsService {
       await this.prisma.notification.create({ data: { userId, type, title, body, linkUrl } });
       // Pas d'await : l'e-mail ne retarde ni ne conditionne l'action qui a déclenché la notification.
       void this.emails.sendFor([userId], type, { title, body, linkUrl });
+      void this.whatsapp.sendFor([userId], type, { title, body, linkUrl });
       return true;
     } catch (error) {
       this.logger.error(`Notification ${type} non écrite pour ${userId} : ${error instanceof Error ? error.message : String(error)}`);
@@ -42,6 +46,7 @@ export class NotificationsService {
       const { title, body, linkUrl } = renderNotification(type, payload);
       await this.prisma.notification.createMany({ data: unique.map((userId) => ({ userId, type, title, body, linkUrl })) });
       void this.emails.sendFor(unique, type, { title, body, linkUrl });
+      void this.whatsapp.sendFor(unique, type, { title, body, linkUrl });
     } catch (error) {
       this.logger.error(`Notification ${type} non écrite pour ${unique.length} personne(s) : ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -88,16 +93,25 @@ export class NotificationsService {
   }
 
   async getPreferences(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { emailNotifications: true, email: true, emailVerifiedAt: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailNotifications: true, email: true, emailVerifiedAt: true, whatsappNotifications: true, phone: true },
+    });
     return {
       emailEnabled: user?.emailNotifications ?? true,
       // Sans adresse vérifiée, aucun e-mail ne part : on le dit à la personne plutôt que de la laisser croire le contraire.
       emailVerified: Boolean(user?.email && user.emailVerifiedAt),
+      whatsappEnabled: user?.whatsappNotifications ?? true,
+      // Un compte Google sans vrai numéro ne peut pas recevoir de message WhatsApp.
+      whatsappAvailable: toWhatsappNumber(user?.phone) !== null,
     };
   }
 
-  async setEmailEnabled(userId: string, emailEnabled: boolean) {
-    await this.prisma.user.update({ where: { id: userId }, data: { emailNotifications: emailEnabled } });
+  async setPreferences(userId: string, prefs: { emailEnabled?: boolean; whatsappEnabled?: boolean }) {
+    const data: { emailNotifications?: boolean; whatsappNotifications?: boolean } = {};
+    if (prefs.emailEnabled !== undefined) data.emailNotifications = prefs.emailEnabled;
+    if (prefs.whatsappEnabled !== undefined) data.whatsappNotifications = prefs.whatsappEnabled;
+    if (Object.keys(data).length > 0) await this.prisma.user.update({ where: { id: userId }, data });
     return this.getPreferences(userId);
   }
 

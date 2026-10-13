@@ -29,6 +29,18 @@ export interface AppConfig {
     fromEmail: string;
     fromName: string;
   };
+  // Messages WhatsApp (API Cloud de Meta). Sans jeton ou sans identifiant de numéro, l'application démarre
+  // quand même : les messages ne partent simplement pas (voir WhatsAppService).
+  whatsapp: {
+    accessToken: string;
+    phoneNumberId: string;
+    /** Nom du modèle de message approuvé par Meta (3 variables : prénom, message, lien). */
+    templateName: string;
+    templateLanguage: string;
+    apiVersion: string;
+  };
+  /** Secret de la tâche planifiée externe (rappels d'arrivée). Vide : la route de rappels est désactivée. */
+  cronSecret: string;
   payment: {
     platformFeePercent: number;
     // Vides tant que le compte Notch Pay n'est pas configuré : l'application
@@ -69,6 +81,14 @@ export default (): AppConfig => ({
     fromEmail: process.env.MAIL_FROM_EMAIL ?? '',
     fromName: process.env.MAIL_FROM_NAME ?? 'SòôRooms',
   },
+  whatsapp: {
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN ?? '',
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? '',
+    templateName: process.env.WHATSAPP_TEMPLATE_NAME ?? 'soorooms_notification',
+    templateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE ?? 'fr',
+    apiVersion: process.env.WHATSAPP_API_VERSION ?? 'v21.0',
+  },
+  cronSecret: process.env.CRON_SECRET ?? '',
   payment: {
     platformFeePercent: parseInt(process.env.PLATFORM_FEE_PERCENT ?? '10', 10),
     notchpay: {
