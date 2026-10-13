@@ -31,6 +31,10 @@ export type NotificationPayloads = {
   PAYOUT_RELEASED: { bookingId: string; amount: number; propertyTitle: string }; // → hôte
   PAYOUT_TO_SEND_STAFF: { amount: number; propertyTitle: string }; // → finance
   PAYOUT_FAILED_STAFF: { amount: number; propertyTitle: string }; // → finance
+  BOOKING_CANCELLED: { bookingId: string; audience: Audience; propertyTitle: string; by: 'traveler' | 'host'; refundAmount: number };
+  REFUND_TO_SEND_STAFF: { amount: number; propertyTitle: string }; // → finance
+  REFUND_FAILED_STAFF: { amount: number; propertyTitle: string }; // → finance
+  REFUND_SENT: { bookingId: string; amount: number; propertyTitle: string }; // → voyageur
   DISPUTE_OPENED: { bookingId: string; audience: Audience };
   DISPUTE_OPENED_STAFF: { bookingId: string }; // → équipe
   // Logements
@@ -214,6 +218,35 @@ const RENDERERS: Renderers = {
     title: 'Versement en échec',
     body: `Le versement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » a échoué. Ouvrez la file pour réessayer.`,
     linkUrl: '/admin/versements',
+  }),
+  BOOKING_CANCELLED: (p) => ({
+    title: 'Réservation annulée',
+    body:
+      p.audience === 'host'
+        ? p.by === 'host'
+          ? `Vous avez annulé la réservation de « ${clip(p.propertyTitle)} ». Le voyageur sera remboursé.`
+          : `Le voyageur a annulé sa réservation de « ${clip(p.propertyTitle)} ». Les dates sont de nouveau libres.`
+        : p.by === 'host'
+          ? `L'hôte a annulé votre réservation de « ${clip(p.propertyTitle)} ». ${fcfa(p.refundAmount)} vous seront remboursés après vérification par notre équipe.`
+          : p.refundAmount > 0
+            ? `Votre réservation de « ${clip(p.propertyTitle)} » est annulée. ${fcfa(p.refundAmount)} vous seront remboursés après vérification par notre équipe.`
+            : `Votre réservation de « ${clip(p.propertyTitle)} » est annulée. Selon la politique de remboursement, aucun montant n'est à rembourser.`,
+    linkUrl: bookingLink(p.audience, p.bookingId),
+  }),
+  REFUND_TO_SEND_STAFF: (p) => ({
+    title: 'Remboursement à envoyer',
+    body: `${fcfa(p.amount)} à rembourser au voyageur de « ${clip(p.propertyTitle)} ».`,
+    linkUrl: '/admin/remboursements',
+  }),
+  REFUND_FAILED_STAFF: (p) => ({
+    title: 'Remboursement en échec',
+    body: `Le remboursement de ${fcfa(p.amount)} pour « ${clip(p.propertyTitle)} » a échoué. Ouvrez la file pour réessayer.`,
+    linkUrl: '/admin/remboursements',
+  }),
+  REFUND_SENT: (p) => ({
+    title: 'Remboursement envoyé 💸',
+    body: `${fcfa(p.amount)} ont été envoyés sur votre compte Mobile Money pour « ${clip(p.propertyTitle)} ».`,
+    linkUrl: bookingLink('traveler', p.bookingId),
   }),
   DISPUTE_OPENED: (p) => ({
     title: 'Un litige a été ouvert',

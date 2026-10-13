@@ -5,6 +5,8 @@ import { BookingsService } from './bookings.service.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
 import { CreateOfferDto } from './dto/create-offer.dto.js';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
+import { CancelBookingDto } from './dto/cancel-booking.dto.js';
+import { SetPayoutDetailsDto } from '../payments/dto/payout-details.dto.js';
 import { IssueInvoiceDto } from './dto/invoice.dto.js';
 
 @ApiBearerAuth()
@@ -85,5 +87,22 @@ export class BookingsController {
     @Body() dto: RaiseDisputeDto,
   ) {
     return this.bookingsService.raiseDispute(id, user.id, dto);
+  }
+
+  @Get(':id/cancellation-preview')
+  cancellationPreview(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.bookingsService.previewCancellation(id, user.id);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CancelBookingDto) {
+    return this.bookingsService.cancel(id, user.id, dto);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/refund-details')
+  refundDetails(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: SetPayoutDetailsDto) {
+    return this.bookingsService.setRefundDetails(id, user.id, dto);
   }
 }

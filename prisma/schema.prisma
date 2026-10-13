@@ -447,6 +447,10 @@ model Booking {
   // quelques heures d'une seule date (checkOutDate = lendemain), jamais la nuit : voir rooms/nap.utils.ts.
   napStartHour   Int?
   napHours       Int?
+  // Annulation (voir BookingsService.cancel) : quand, par qui, pourquoi.
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
   depositPercent Int?
   balanceDueAt   DateTime?
   // Attestation de réservation signée par un gérant du logement (démarches de visa, court séjour).
@@ -516,6 +520,7 @@ model EscrowVault {
 
   transactions  Transaction[]
   payout        Payout?
+  refund        Refund?
 }
 enum PayoutStatus {
   TO_SEND
@@ -548,6 +553,34 @@ model Payout {
   @@index([status, createdAt])
 }
 
+
+// Remboursement d'un voyageur après annulation ou litige : même circuit que Payout (validation par la finance,
+// envoi par Mobile Money). Un séquestre n'a jamais qu'un seul remboursement.
+model Refund {
+  id               String       @id @default(uuid())
+  escrowId         String       @unique
+  escrow           EscrowVault  @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  travelerId       String?
+  amount           Decimal      @db.Decimal(10, 2)
+  // TRAVELER_CANCEL, HOST_CANCEL, DISPUTE
+  reason           String
+  status           PayoutStatus @default(TO_SEND)
+  attempts         Int          @default(0)
+  reference        String?      @unique
+  gatewayRef       String?
+  // Numéro Mobile Money où rembourser, indiqué par le voyageur à l'annulation.
+  beneficiaryChannel String?
+  beneficiaryPhone   String?
+  beneficiaryName    String?
+  failureReason    String?
+  sentById         String?
+  sentAt           DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([status, createdAt])
+}
 
 model Transaction {
   id              String            @id @default(uuid())

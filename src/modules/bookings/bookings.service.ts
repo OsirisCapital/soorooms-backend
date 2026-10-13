@@ -11,6 +11,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -32,6 +33,10 @@ import type { IssueInvoiceDto } from './dto/invoice.dto.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { RaiseDisputeDto } from './dto/raise-dispute.dto.js';
+import type { CancelBookingDto } from './dto/cancel-booking.dto.js';
+import type { SetPayoutDetailsDto } from '../payments/dto/payout-details.dto.js';
+import { normalizeCameroonMobile } from '../payments/payout-phone.js';
+import { decideRefund, type RefundDecision, type RefundKind } from './refund-policy.js';
 
 /** Une notification à envoyer : son type et les données qui la composent (vérifiés ensemble). */
 type NotificationSpec = { [K in NotificationType]: [K, NotificationPayloads[K]] }[NotificationType];
@@ -43,6 +48,8 @@ type NotificationSpec = { [K in NotificationType]: [K, NotificationPayloads[K]] 
 
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentsService: PaymentsService,
@@ -233,10 +240,17 @@ export class BookingsService {
     const booking = await this.loadBookingContext(bookingId);
     this.assertParticipant(booking, userId);
     // Prochain paiement attendu (paiement unique, acompte ou solde) — sans exposer le détail du séquestre.
-    const escrow = await this.prisma.escrowVault.findUnique({ where: { bookingId }, select: { amountHeld: true, depositAmount: true } });
+    const escrow = await this.prisma.escrowVault.findUnique({
+      where: { bookingId },
+      select: { amountHeld: true, depositAmount: true, refund: { select: { amount: true, status: true, beneficiaryPhone: true } } },
+    });
+    // Remboursement en cours (visible du voyageur seulement) : montant, état, et s'il manque encore son numéro.
+    const refund = booking.travelerId === userId && escrow?.refund
+      ? { amount: Number(escrow.refund.amount), status: escrow.refund.status, hasNumber: !!escrow.refund.beneficiaryPhone }
+      : null;
     // Le jeton du lien de paiement est un secret du voyageur : jamais renvoyé tel quel, ni à l'hôte.
     const { payToken, ...safe } = booking as typeof booking & { payToken?: string | null };
-    return { ...safe, payLinkActive: booking.travelerId === userId && !!payToken, nextPayment: escrow ? nextStage(booking, escrow) : null };
+    return { ...safe, payLinkActive: booking.travelerId === userId && !!payToken, nextPayment: escrow ? nextStage(booking, escrow) : null, refund };
   }
 
   /** Reçu du voyageur : disponible dès qu'un paiement a abouti. */
@@ -497,6 +511,173 @@ export class BookingsService {
     await this.notifyOthers(booking, userId, (audience) => ['DISPUTE_OPENED', { bookingId, audience }]);
     await this.notifications.notifyStaff('disputes.view', 'DISPUTE_OPENED_STAFF', { bookingId });
     return this.findOne(bookingId, userId);
+  }
+
+  // ---------------------------------------------------------------------
+  // Annulation et remboursement
+  // ---------------------------------------------------------------------
+
+  /** Ce qui se passerait si on annulait maintenant (montant remboursé, règle appliquée). Ne modifie rien. */
+  async previewCancellation(bookingId: string, userId: string) {
+    const ctx = await this.cancellationContext(bookingId, userId);
+    const base = { actor: ctx.actor, status: ctx.booking.status, currency: ctx.booking.currency };
+    if (!ctx.cancellable) {
+      return { ...base, canCancel: false as const, reason: ctx.reason };
+    }
+    if (!ctx.decision) {
+      return { ...base, canCancel: true as const, paid: 0, refund: 0, retained: 0, percent: 0, label: "Rien n'a encore été payé : l'annulation est gratuite.", needsRefundNumber: false };
+    }
+    const d = ctx.decision;
+    if (!d.allowed) return { ...base, canCancel: false as const, reason: d.reason };
+    return {
+      ...base,
+      canCancel: true as const,
+      paid: ctx.paid,
+      refund: d.refund,
+      retained: d.retained,
+      percent: d.percent,
+      label: d.label,
+      needsRefundNumber: ctx.actor === 'TRAVELER' && d.refund > 0,
+    };
+  }
+
+  /** Annulation par le voyageur (règles de la politique de remboursement) ou par un gérant du logement (100 %). */
+  async cancel(bookingId: string, userId: string, dto: CancelBookingDto) {
+    const ctx = await this.cancellationContext(bookingId, userId);
+    if (!ctx.cancellable) throw new ConflictException(ctx.reason);
+    const { booking, actor, decision, escrow } = ctx;
+    if (decision && !decision.allowed) throw new ConflictException(decision.reason);
+    const money = decision && decision.allowed ? decision : null;
+    const refundAmount = money?.refund ?? 0;
+
+    // Un voyageur qui annule doit dire où le rembourser. L'hôte qui annule : le voyageur l'indiquera ensuite.
+    let beneficiary: { channel: string; phone: string; name: string } | null = null;
+    if (actor === 'TRAVELER' && refundAmount > 0) {
+      const phone = dto.refundPhone ? normalizeCameroonMobile(dto.refundPhone) : null;
+      const name = dto.refundName?.replace(/\s+/g, ' ').trim();
+      if (!dto.refundChannel || !phone || !name || name.length < 2) {
+        throw new BadRequestException('Indiquez le numéro Mobile Money (MTN ou Orange, 9 chiffres commençant par 6) et le nom du titulaire pour recevoir votre remboursement.');
+      }
+      beneficiary = { channel: dto.refundChannel, phone, name };
+    }
+
+    const reason = dto.reason?.trim().slice(0, 300) || null;
+    const cancelledBy = actor === 'TRAVELER' ? 'TRAVELER_CANCEL' : 'HOST_CANCEL';
+    await this.prisma.$transaction(
+      async (tx) => {
+        const res = await tx.booking.updateMany({
+          where: { id: booking.id, status: booking.status },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: userId, cancelReason: reason },
+        });
+        if (res.count === 0) throw new ConflictException('Cette réservation vient de changer : actualisez la page.');
+        await tx.auditLog.create({
+          data: { actorId: userId, action: 'booking.cancel', targetType: 'Booking', targetId: booking.id, meta: { actor, status: booking.status, paid: ctx.paid, refund: refundAmount } },
+        });
+        if (!escrow || !money || ctx.paid <= 0) return;
+        // Le séquestre ne garde plus que la part non remboursée, répartie entre l'hôte et la plateforme.
+        if (money.refund > 0 || ctx.paid < Number(escrow.amountHeld)) {
+          await tx.escrowVault.update({
+            where: { id: escrow.id },
+            data: {
+              amountHeld: money.retained,
+              hostPayout: money.hostPayout,
+              platformFee: money.retained - money.hostPayout,
+              travelerFee: money.travelerFeeKept,
+              ...(money.retained > 0 && money.hostPayout === 0 ? { status: 'RELEASED_TO_HOST' as const } : {}),
+            },
+          });
+        }
+        if (money.refund > 0) {
+          await tx.refund.create({
+            data: {
+              escrowId: escrow.id,
+              travelerId: booking.travelerId,
+              amount: money.refund,
+              reason: cancelledBy,
+              beneficiaryChannel: beneficiary?.channel ?? null,
+              beneficiaryPhone: beneficiary?.phone ?? null,
+              beneficiaryName: beneficiary?.name ?? null,
+            },
+          });
+        }
+      },
+      { timeout: 15_000 },
+    );
+
+    // La part conservée par l'hôte entre dans la file des versements (la finance valide, comme d'habitude).
+    if (money && money.hostPayout > 0) {
+      try {
+        await this.paymentsService.releaseEscrow(booking.id);
+      } catch (error) {
+        this.logger.error(`Annulation ${booking.id} : versement à l'hôte non mis en file (${error instanceof Error ? error.message : String(error)}). À traiter à la main.`);
+      }
+    }
+
+    const by = actor === 'TRAVELER' ? 'traveler' : 'host';
+    const propertyTitle = booking.room.property.title;
+    await this.notifyOthers(booking, userId, (audience) => ['BOOKING_CANCELLED', { bookingId: booking.id, audience, propertyTitle, by, refundAmount }]);
+    if (actor === 'HOST') {
+      // Le gérant qui annule reçoit aussi la confirmation sur sa propre page.
+      await this.notifications.notify(userId, 'BOOKING_CANCELLED', { bookingId: booking.id, audience: 'host', propertyTitle, by, refundAmount });
+    }
+    if (refundAmount > 0) {
+      await this.notifications.notifyStaff('payouts.manage', 'REFUND_TO_SEND_STAFF', { amount: refundAmount, propertyTitle });
+    }
+    return this.findOne(bookingId, userId);
+  }
+
+  /** Le voyageur indique (ou corrige) le numéro Mobile Money où recevoir un remboursement pas encore envoyé. */
+  async setRefundDetails(bookingId: string, userId: string, dto: SetPayoutDetailsDto) {
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, select: { travelerId: true, escrowVault: { select: { refund: { select: { id: true, status: true } } } } } });
+    if (!booking || booking.travelerId !== userId) throw new NotFoundException('Réservation introuvable.');
+    const refund = booking.escrowVault?.refund;
+    if (!refund) throw new ConflictException("Aucun remboursement n'est prévu pour cette réservation.");
+    if (refund.status !== 'TO_SEND' && refund.status !== 'FAILED') throw new ConflictException('Ce remboursement est déjà en cours ou terminé.');
+    const phone = normalizeCameroonMobile(dto.phone);
+    if (!phone) throw new BadRequestException('Numéro invalide : indiquez un numéro mobile camerounais (9 chiffres, commençant par 6).');
+    const name = dto.accountName.replace(/\s+/g, ' ').trim();
+    if (name.length < 2) throw new BadRequestException('Indiquez le nom du titulaire du compte.');
+    const res = await this.prisma.refund.updateMany({
+      where: { id: refund.id, status: { in: ['TO_SEND', 'FAILED'] } },
+      data: { beneficiaryChannel: dto.channel, beneficiaryPhone: phone, beneficiaryName: name },
+    });
+    if (res.count === 0) throw new ConflictException('Ce remboursement vient de partir : le numéro ne peut plus changer.');
+    return { ok: true };
+  }
+
+  /** Charge la réservation et calcule, selon les règles, ce que rapporterait une annulation maintenant. */
+  private async cancellationContext(bookingId: string, userId: string) {
+    const booking = await this.loadBookingContext(bookingId);
+    this.assertParticipant(booking, userId);
+    const actor: 'TRAVELER' | 'HOST' = booking.travelerId === userId ? 'TRAVELER' : 'HOST';
+    const no = (reason: string) => ({ booking, actor, cancellable: false as const, reason });
+    if (booking.status === 'CANCELLED') return no('Cette réservation est déjà annulée.');
+    if (booking.status === 'COMPLETED') return no('Cette réservation est terminée.');
+    if (booking.status === 'DISPUTED') return no("Un litige est en cours sur cette réservation : l'équipe SòôRooms la traite, les fonds restent bloqués.");
+    if (booking.status === 'NEGOTIATING' || booking.status === 'PENDING_PAYMENT') {
+      return { booking, actor, cancellable: true as const, decision: null, paid: 0, escrow: null };
+    }
+    const escrow = await this.prisma.escrowVault.findUnique({
+      where: { bookingId },
+      include: { transactions: { where: { transactionStatus: 'SUCCESS' }, select: { amount: true } } },
+    });
+    if (!escrow) return no("Aucun paiement n'a été trouvé pour cette réservation.");
+    const paid = escrow.transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const type = booking.room.property.propertyType;
+    const kind: RefundKind = booking.napStartHour != null ? 'NAP' : type === 'EVENT_HALL' ? 'HALL' : type === 'STUDENT_RESIDENCE' ? 'RESIDENCE' : 'NIGHT';
+    const decision: RefundDecision = decideRefund({
+      kind,
+      checkInDate: booking.checkInDate,
+      napStartHour: booking.napStartHour,
+      now: new Date(),
+      actor,
+      amountHeld: Number(escrow.amountHeld),
+      travelerFee: Number(escrow.travelerFee),
+      hostPayout: Number(escrow.hostPayout),
+      depositAmount: escrow.depositAmount == null ? null : Number(escrow.depositAmount),
+      paid,
+    });
+    return { booking, actor, cancellable: true as const, decision, paid, escrow };
   }
 
   /** Passe la réservation à COMPLETED et déclenche le reversement dès que

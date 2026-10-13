@@ -26,6 +26,7 @@ import { computeAmounts } from '../fees/fees.utils.js';
 import { FeesService } from '../fees/fees.service.js';
 import { balanceDeadline, nextStage, planPayment, type PaymentStage } from './deposit.utils.js';
 import { PayoutsService } from './payouts.service.js';
+import { REFUND_REFERENCE_PREFIX, RefundsService } from './refunds.service.js';
 import { VisitPaymentsService } from './visit-payments.service.js';
 import {
   PAYMENT_GATEWAY,
@@ -48,6 +49,8 @@ export class PaymentsService {
     @Optional() private readonly fees?: FeesService,
     // Paiement des visites de vérification : une référence peut désigner une visite au lieu d'une réservation.
     @Optional() private readonly visitPayments?: VisitPaymentsService,
+    // Remboursements aux voyageurs : leurs transferts ont une référence « rf_… ».
+    @Optional() private readonly refunds?: RefundsService,
   ) {}
 
   async initiate(bookingId: string, userId: string) {
@@ -128,6 +131,9 @@ export class PaymentsService {
     // Webhook de VERSEMENT à un hôte (transfer.*) : traité par PayoutsService, après relecture chez l'agrégateur.
     const transfer = this.gateway.parseTransferWebhook(rawBody);
     if (transfer) {
+      if (transfer.reference.startsWith(REFUND_REFERENCE_PREFIX)) {
+        return this.refunds ? this.refunds.applyTransferEvent(transfer.reference) : { ignored: true };
+      }
       if (!this.payouts) return { ignored: true };
       return this.payouts.applyTransferEvent(transfer.reference);
     }

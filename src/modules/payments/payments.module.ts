@@ -8,15 +8,18 @@ import { PaymentsController } from './payments.controller.js';
 import { PaymentsService } from './payments.service.js';
 import { AdminPayoutsController, PayoutDetailsController } from './payouts.controller.js';
 import { PayoutsService } from './payouts.service.js';
+import { AdminRefundsController } from './refunds.controller.js';
+import { RefundsService } from './refunds.service.js';
 import { VisitPaymentsService } from './visit-payments.service.js';
 
 @Module({
   imports: [FeesModule],
-  controllers: [PaymentsController, BookingPayLinkController, PublicPayLinkController, AdminPayoutsController, PayoutDetailsController],
+  controllers: [PaymentsController, BookingPayLinkController, PublicPayLinkController, AdminPayoutsController, PayoutDetailsController, AdminRefundsController],
   providers: [
     PaymentsService,
     PayLinksService,
     PayoutsService,
+    RefundsService,
     VisitPaymentsService,
     // Bascule ici vers une autre implémentation (CinetPay, par exemple)
     // le jour venu — PaymentsService ne dépend que du jeton PAYMENT_GATEWAY,
