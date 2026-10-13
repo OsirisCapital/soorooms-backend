@@ -16,6 +16,12 @@ import { PrismaService } from './prisma/prisma.service.js';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
+  // Derrière le répartiteur de Render (et, si on l'utilise, le relais de Vercel), l'adresse « vue » par le serveur est celle
+  // du relais, la même pour tout le monde : sans cette ligne, la limite de tentatives (5 connexions par minute) serait
+  // partagée entre TOUS les utilisateurs. TRUST_PROXY_HOPS = nombre de relais de confiance (1 = Render seul ; 2 = Vercel puis Render).
+  const hops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10);
+  (app.getHttpAdapter().getInstance() as { set: (key: string, value: unknown) => void }).set('trust proxy', Number.isInteger(hops) && hops >= 0 ? hops : 1);
+
   app.use(helmet());
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
