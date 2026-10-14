@@ -26,6 +26,6 @@ import { VisitPaymentsService } from './visit-payments.service.js';
     // jamais d'une classe concrète.
     { provide: PAYMENT_GATEWAY, useClass: NotchPayGateway },
   ],
-  exports: [PaymentsService],
+  exports: [PaymentsService, PAYMENT_GATEWAY],
 })
 export class PaymentsModule {}

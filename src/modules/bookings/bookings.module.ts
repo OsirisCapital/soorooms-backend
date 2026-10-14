@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { LoyaltyModule } from '../loyalty/loyalty.module.js';
+import { PartnersModule } from '../partners/partners.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { ArrivalRemindersController } from './arrival-reminders.controller.js';
 import { ArrivalRemindersService } from './arrival-reminders.service.js';
@@ -11,7 +12,7 @@ import { AdminDisputesController } from './admin-disputes.controller.js';
 import { DisputesService } from './disputes.service.js';
 
 @Module({
-  imports: [PaymentsModule, LoyaltyModule],
+  imports: [PaymentsModule, LoyaltyModule, PartnersModule],
   controllers: [BookingsController, AttestationsController, PublicAttestationsController, AdminDisputesController, ArrivalRemindersController],
   providers: [BookingsService, AttestationsService, DisputesService, ArrivalRemindersService],
   exports: [BookingsService],

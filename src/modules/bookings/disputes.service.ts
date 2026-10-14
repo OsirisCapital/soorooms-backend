@@ -11,6 +11,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { can } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { LoyaltyService } from '../loyalty/loyalty.service.js';
+import { PartnersService } from '../partners/partners.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import type { ResolveDisputeDto } from './dto/resolve-dispute.dto.js';
@@ -25,6 +26,7 @@ export class DisputesService {
     private readonly payments: PaymentsService,
     private readonly notifications: NotificationsService,
     @Optional() private readonly loyalty?: LoyaltyService,
+    @Optional() private readonly partners?: PartnersService,
   ) {}
 
   /** Litiges ouverts avec tout ce qu'il faut pour décider : motif, montants, état des files. */
@@ -150,6 +152,7 @@ export class DisputesService {
       }
     }
     if (dto.decision === 'PAY_HOST') await this.loyalty?.awardForCompletedBooking(booking.id);
+    await this.partners?.accrueForBooking(booking.id);
 
     const propertyTitle = booking.room.property.title;
     const payload = { bookingId: booking.id, propertyTitle, decision: dto.decision, refundAmount: refund, note };

@@ -126,6 +126,11 @@ describe('renderNotification', () => {
       VISIT_ASSIGNED: { visitId: 'v1', propertyTitle: 'Studio Akwa', city: 'Douala' },
       VISIT_DONE: { propertyId: 'p1', propertyTitle: 'Studio Akwa', conforming: true },
       FEES_CHANGED_HOST: { hostPercent: 5, standardPercent: 10, launchEndsAt: '2027-01-12' },
+      PARTNER_REFERRAL_JOINED: { name: 'Awa' },
+      PARTNER_COMMISSION_EARNED: { amount: 300, kind: 'HOST', propertyTitle: 'P' },
+      PARTNER_PAYOUT_REQUESTED_STAFF: { amount: 5000 },
+      PARTNER_PAYOUT_SENT: { amount: 5000 },
+      PARTNER_PAYOUT_REJECTED: { reason: 'Compte invalide.' },
       ANNOUNCEMENT: { title: 'T', body: 'B' },
     };
     for (const type of Object.keys(samples) as NotificationType[]) {

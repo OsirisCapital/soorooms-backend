@@ -28,10 +28,11 @@ function setup(o: { status?: string; days?: number; type?: string; nap?: number 
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const payments = { releaseEscrow: vi.fn().mockResolvedValue({}) };
+  const partners = { accrueForBooking: vi.fn() };
   const notifications = { notify: vi.fn(), notifyMany: vi.fn(), notifyStaff: vi.fn() };
-  const service = new BookingsService(prisma as unknown as PrismaService, payments as unknown as PaymentsService, notifications as unknown as NotificationsService);
+  const service = new BookingsService(prisma as unknown as PrismaService, payments as unknown as PaymentsService, notifications as unknown as NotificationsService, undefined, partners as never);
   vi.spyOn(service, 'findOne').mockResolvedValue({} as never);
-  return { service, tx, payments, notifications, who: o.host ? 'h1' : 't1' };
+  return { service, tx, payments, notifications, partners, who: o.host ? 'h1' : 't1' };
 }
 const NUMBER = { refundChannel: 'cm.mtn', refundPhone: '670 00 00 00', refundName: 'Awa Ngono' } as never;
 
@@ -52,6 +53,8 @@ describe('BookingsService.cancel — voyageur', () => {
     expect(c.tx.refund.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amount: 50_000 }) });
     expect(c.tx.escrowVault.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amountHeld: 55_000, hostPayout: 45_000, platformFee: 10_000, travelerFee: 5_000 }) }));
     expect(c.payments.releaseEscrow).toHaveBeenCalledWith('b1');
+    // Le revenu conservé (10 000) ouvre droit à la commission du partenaire éventuel.
+    expect(c.partners.accrueForBooking).toHaveBeenCalledWith('b1');
   });
 
   it('exige le numéro Mobile Money quand un remboursement est dû', async () => {

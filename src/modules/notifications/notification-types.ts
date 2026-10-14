@@ -61,6 +61,12 @@ export type NotificationPayloads = {
   STAFF_ACCESS_CHANGED: { roleLabel: string | null }; // → membre concerné (null : retiré de l'équipe)
   TASK_ASSIGNED: { taskId: string; title: string; fromName: string; dueDate?: string }; // → assigné
   TASK_DONE: { taskId: string; title: string; byName: string }; // → créateur
+  // Programme partenaire
+  PARTNER_REFERRAL_JOINED: { name: string }; // → partenaire
+  PARTNER_COMMISSION_EARNED: { amount: number; kind: string; propertyTitle: string }; // → partenaire
+  PARTNER_PAYOUT_REQUESTED_STAFF: { amount: number }; // → finance
+  PARTNER_PAYOUT_SENT: { amount: number }; // → partenaire
+  PARTNER_PAYOUT_REJECTED: { reason: string }; // → partenaire
   // Autres
   MESSAGE_RECEIVED: { fromName: string; bookingId?: string };
   FEES_CHANGED_STAFF: { hostPercent: number; travelerPercent: number }; // → équipe réglages
@@ -388,6 +394,31 @@ const RENDERERS: Renderers = {
       ? `Commission SòôRooms : ${pct(p.hostPercent)} (offre de lancement) jusqu'au ${p.launchEndsAt}, puis ${pct(p.standardPercent)}.`
       : `Commission SòôRooms : ${pct(p.hostPercent)} sur vos prochaines réservations.`,
     linkUrl: '/hote/finances',
+  }),
+  PARTNER_REFERRAL_JOINED: (p) => ({
+    title: 'Nouveau filleul 🎉',
+    body: `${clip(p.name, 40)} vient de s'inscrire avec votre lien.`,
+    linkUrl: '/profil/partenaire',
+  }),
+  PARTNER_COMMISSION_EARNED: (p) => ({
+    title: 'Commission gagnée 💰',
+    body: `+${fcfa(p.amount)} ${p.kind === 'HOST' ? 'grâce à un hôte que vous avez amené' : 'grâce à un voyageur que vous avez amené'} (« ${clip(p.propertyTitle)} »).`,
+    linkUrl: '/profil/partenaire',
+  }),
+  PARTNER_PAYOUT_REQUESTED_STAFF: (p) => ({
+    title: 'Retrait partenaire à valider',
+    body: `${fcfa(p.amount)} à verser à un partenaire.`,
+    linkUrl: '/admin/partenaires',
+  }),
+  PARTNER_PAYOUT_SENT: (p) => ({
+    title: 'Retrait envoyé 💸',
+    body: `${fcfa(p.amount)} ont été envoyés sur votre compte Mobile Money.`,
+    linkUrl: '/profil/partenaire',
+  }),
+  PARTNER_PAYOUT_REJECTED: (p) => ({
+    title: 'Retrait refusé',
+    body: `Votre demande de retrait n'a pas pu être traitée : ${clip(p.reason, 160)} Votre solde reste disponible.`,
+    linkUrl: '/profil/partenaire',
   }),
   ANNOUNCEMENT: (p) => ({
     title: clip(p.title, 100),

@@ -16,6 +16,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { LoyaltyService } from '../loyalty/loyalty.service.js';
+import { PartnersService } from '../partners/partners.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { can, userIdsWith } from '../../common/utils/collaborator-access.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -57,6 +58,8 @@ export class BookingsService {
     private readonly notifications: NotificationsService,
     // Optionnel : les points de fidélité ne sont qu'un effet secondaire de la clôture d'une réservation.
     @Optional() private readonly loyalty?: LoyaltyService,
+    // Optionnel aussi : la commission d'un partenaire est un effet secondaire de la clôture.
+    @Optional() private readonly partners?: PartnersService,
   ) {}
 
   async create(travelerId: string, dto: CreateBookingDto) {
@@ -605,6 +608,9 @@ export class BookingsService {
       { timeout: 15_000 },
     );
 
+    // Le revenu conservé par SòôRooms après annulation ouvre droit à la commission du partenaire éventuel.
+    if (money && ctx.paid > 0) await this.partners?.accrueForBooking(booking.id);
+
     // La part conservée par l'hôte entre dans la file des versements (la finance valide, comme d'habitude).
     if (money && money.hostPayout > 0) {
       try {
@@ -701,6 +707,7 @@ export class BookingsService {
       if (done.count > 0) {
         await this.notifyCompletion(bookingId);
         await this.loyalty?.awardForCompletedBooking(bookingId);
+        await this.partners?.accrueForBooking(bookingId);
         return true;
       }
     }

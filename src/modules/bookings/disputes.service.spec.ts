@@ -23,8 +23,9 @@ function setup(o: { status?: string; payout?: boolean; paid?: number; claim?: nu
   const payments = { releaseEscrow: vi.fn().mockResolvedValue({}) };
   const notifications = { notify: vi.fn(), notifyStaff: vi.fn() };
   const loyalty = { awardForCompletedBooking: vi.fn() };
-  const service = new DisputesService(prisma as never, payments as never, notifications as never, loyalty as never);
-  return { service, tx, payments, notifications, loyalty };
+  const partners = { accrueForBooking: vi.fn() };
+  const service = new DisputesService(prisma as never, payments as never, notifications as never, loyalty as never, partners as never);
+  return { service, tx, payments, notifications, loyalty, partners };
 }
 const NOTE = 'Photos reçues, le logement ne correspond pas.';
 
@@ -70,6 +71,13 @@ describe('DisputesService.resolve', () => {
     expect(c.tx.refund.create).not.toHaveBeenCalled();
     expect(c.payments.releaseEscrow).toHaveBeenCalledWith('b1');
     expect(c.loyalty.awardForCompletedBooking).toHaveBeenCalledWith('b1');
+    expect(c.partners.accrueForBooking).toHaveBeenCalledWith('b1');
+  });
+
+  it('un remboursement partiel ouvre aussi le calcul de la commission partenaire (sur le revenu conservé)', async () => {
+    const c = setup();
+    await c.service.resolve('b1', 'adm', { decision: 'REFUND_PARTIAL', refundAmount: 5000, note: NOTE });
+    expect(c.partners.accrueForBooking).toHaveBeenCalledWith('b1');
   });
 
   it('refuse un litige déjà tranché ou des fonds déjà traités', async () => {
