@@ -74,7 +74,9 @@ export function splitWithholding(gross: number, withholdingPercent: number): { w
 export const PARTNER_TERMS = [
   "Vous recevez une commission sur le revenu que SòôRooms conserve réellement sur les réservations des hôtes et voyageurs que vous avez parrainés, aux taux et pour les durées affichés dans votre espace.",
   "En cas d'annulation ou de remboursement, la commission porte sur le revenu que SòôRooms a effectivement conservé : aucune commission n'est reprise sur ce qui a déjà été gagné, et rien n'est dû sur ce qui a été remboursé.",
+  "Le programme est ouvert à toute personne majeure titulaire d'un compte SòôRooms, hors membres de l'équipe SòôRooms : un membre de l'équipe ne peut pas devenir partenaire, et un partenaire qui rejoint l'équipe ne perçoit plus de commission tant qu'il en fait partie (ses gains déjà acquis restent retirables).",
   "Vous ne gagnez rien sur vos propres logements ni sur vos propres réservations, ni sur un compte de votre entourage créé pour contourner cette règle.",
   "Le retrait se fait sur un compte Mobile Money à votre nom, après vérification de votre identité. Des retenues fiscales peuvent s'appliquer selon la loi en vigueur.",
+  "Le règlement complet du programme est consultable à tout moment sur la page « Règlement du programme partenaire ».",
   "SòôRooms peut modifier ou suspendre le programme ; les changements s'appliquent aux réservations futures et vous sont notifiés. Une fraude entraîne la suspension du compte et la perte des gains non retirés.",
 ];

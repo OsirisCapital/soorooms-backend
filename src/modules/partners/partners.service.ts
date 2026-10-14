@@ -103,18 +103,29 @@ export class PartnersService {
     const config = await this.getConfig();
     const partner = await this.prisma.partnerProfile.findUnique({ where: { userId } });
     const base = { config, terms: PARTNER_TERMS };
-    if (!partner) return { ...base, partner: null };
+    if (!partner) {
+      const account = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      const blockedReason = account?.role === 'ADMIN' ? 'STAFF' : !config.enabled ? 'CLOSED' : null;
+      return { ...base, canActivate: blockedReason === null, blockedReason, partner: null };
+    }
     const [user, balance, referralCount, hostCount, pending] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, kycStatus: true } }),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, kycStatus: true, role: true } }),
       this.balanceOf(partner.id),
       this.prisma.partnerReferral.count({ where: { partnerId: partner.id } }),
       this.prisma.partnerReferral.count({ where: { partnerId: partner.id, hostStartedAt: { not: null } } }),
       this.prisma.partnerPayout.findFirst({ where: { partnerId: partner.id, status: { in: OPEN_PAYOUT } }, select: { id: true } }),
     ]);
     const complete = !!(partner.payoutChannel && partner.payoutPhone && partner.payoutAccountName);
+    // Un membre de l'équipe ne gagne plus de commission tant qu'il en fait partie (voir accrue) : calculé à la volée,
+    // donc rien à défaire quand il quitte l'équipe. Les gains déjà acquis restent retirables.
+    const earningBlockedReason = user?.role === 'ADMIN' ? 'STAFF' : partner.status !== 'ACTIVE' ? 'SUSPENDED' : !config.enabled ? 'CLOSED' : null;
     return {
       ...base,
+      canActivate: false,
+      blockedReason: null,
       partner: {
+        earning: earningBlockedReason === null,
+        earningBlockedReason,
         code: partner.code,
         status: partner.status,
         suspendedReason: partner.suspendedReason,
@@ -300,7 +311,7 @@ export class PartnersService {
     const ids = [booking.travelerId, ...(hostId ? [hostId] : [])];
     const referrals = await this.prisma.partnerReferral.findMany({
       where: { referredUserId: { in: ids } },
-      include: { partner: { select: { id: true, userId: true, status: true, payoutPhone: true } } },
+      include: { partner: { select: { id: true, userId: true, status: true, payoutPhone: true, user: { select: { role: true } } } } },
     });
     if (referrals.length === 0) return;
     const hostPhone = hostId ? (await this.prisma.hostProfile.findUnique({ where: { userId: hostId }, select: { payoutPhone: true } }))?.payoutPhone ?? null : null;
@@ -311,6 +322,8 @@ export class PartnersService {
       const kind = ref.referredUserId === hostId ? 'HOST' : 'TRAVELER';
       const partner = ref.partner;
       if (partner.status !== 'ACTIVE') continue;
+      // Conflit d'intérêts : un membre de l'équipe ne perçoit aucune commission pendant qu'il en fait partie.
+      if (partner.user.role === 'ADMIN') continue;
       // Aucune commission sur ses propres logements ou réservations, ni sur un hôte payé sur le même numéro.
       if (partner.userId === hostId || partner.userId === booking.travelerId) continue;
       if (hostPhone && partner.payoutPhone && partner.payoutPhone === hostPhone) continue;

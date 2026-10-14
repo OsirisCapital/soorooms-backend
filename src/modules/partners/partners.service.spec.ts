@@ -129,7 +129,7 @@ describe('PartnersService.accrueForBooking', () => {
     escrowVault: { platformFee: 1500 },
     ...over,
   });
-  const hostRef = (over: object = {}) => ({ id: 'ref1', referredUserId: 'host', hostEndsAt: null, travelerEndsAt: new Date('2027-05-01'), partner: { id: 'pa1', userId: 'pu1', status: 'ACTIVE', payoutPhone: '+237670000000' }, ...over });
+  const hostRef = (over: object = {}) => ({ id: 'ref1', referredUserId: 'host', hostEndsAt: null, travelerEndsAt: new Date('2027-05-01'), partner: { id: 'pa1', userId: 'pu1', status: 'ACTIVE', payoutPhone: '+237670000000', user: { role: 'TRAVELER' } }, ...over });
   function ready(b: object, refs: object[]) {
     const c = make();
     c.prisma.booking.findUnique.mockResolvedValue(b);
@@ -163,25 +163,30 @@ describe('PartnersService.accrueForBooking', () => {
     expect(c.tx.partnerCommission.create).not.toHaveBeenCalled();
   });
   it('ne crédite rien sur ses propres logements ni ses propres réservations', async () => {
-    const own = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'host', status: 'ACTIVE', payoutPhone: null } })]);
+    const own = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'host', status: 'ACTIVE', payoutPhone: null, user: { role: 'TRAVELER' } } })]);
     await own.service.accrueForBooking('b1');
     expect(own.tx.partnerCommission.create).not.toHaveBeenCalled();
-    const asTraveler = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'trav', status: 'ACTIVE', payoutPhone: null } })]);
+    const asTraveler = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'trav', status: 'ACTIVE', payoutPhone: null, user: { role: 'TRAVELER' } } })]);
     await asTraveler.service.accrueForBooking('b1');
     expect(asTraveler.tx.partnerCommission.create).not.toHaveBeenCalled();
   });
   it("ne crédite rien si le partenaire est payé sur le même numéro que l'hôte", async () => {
-    const c = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'pu1', status: 'ACTIVE', payoutPhone: '+237699999999' } })]);
+    const c = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'pu1', status: 'ACTIVE', payoutPhone: '+237699999999', user: { role: 'TRAVELER' } } })]);
+    await c.service.accrueForBooking('b1');
+    expect(c.tx.partnerCommission.create).not.toHaveBeenCalled();
+  });
+  it("ne crédite rien à un partenaire devenu membre de l'équipe", async () => {
+    const c = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'pu1', status: 'ACTIVE', payoutPhone: null, user: { role: 'ADMIN' } } })]);
     await c.service.accrueForBooking('b1');
     expect(c.tx.partnerCommission.create).not.toHaveBeenCalled();
   });
   it('ne crédite rien à un partenaire suspendu', async () => {
-    const c = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'pu1', status: 'SUSPENDED', payoutPhone: null } })]);
+    const c = ready(booking(), [hostRef({ partner: { id: 'pa1', userId: 'pu1', status: 'SUSPENDED', payoutPhone: null, user: { role: 'TRAVELER' } } })]);
     await c.service.accrueForBooking('b1');
     expect(c.tx.partnerCommission.create).not.toHaveBeenCalled();
   });
   it('crédite 10 % pour un voyageur parrainé, dans sa fenêtre de 6 mois', async () => {
-    const trav = { id: 'ref2', referredUserId: 'trav', hostEndsAt: null, travelerEndsAt: new Date('2027-02-01'), partner: { id: 'pa2', userId: 'pu2', status: 'ACTIVE', payoutPhone: null } };
+    const trav = { id: 'ref2', referredUserId: 'trav', hostEndsAt: null, travelerEndsAt: new Date('2027-02-01'), partner: { id: 'pa2', userId: 'pu2', status: 'ACTIVE', payoutPhone: null, user: { role: 'TRAVELER' } } };
     const c = ready(booking(), [trav]);
     await c.service.accrueForBooking('b1');
     expect(c.tx.partnerCommission.create.mock.calls[0]![0].data).toMatchObject({ kind: 'TRAVELER', ratePercent: 10, amount: 150 });
@@ -190,7 +195,7 @@ describe('PartnersService.accrueForBooking', () => {
     expect(late.tx.partnerCommission.create).not.toHaveBeenCalled();
   });
   it('respecte le plafond cumulé quand deux partenaires sont en jeu', async () => {
-    const trav = { id: 'ref2', referredUserId: 'trav', hostEndsAt: null, travelerEndsAt: new Date('2027-02-01'), partner: { id: 'pa2', userId: 'pu2', status: 'ACTIVE', payoutPhone: null } };
+    const trav = { id: 'ref2', referredUserId: 'trav', hostEndsAt: null, travelerEndsAt: new Date('2027-02-01'), partner: { id: 'pa2', userId: 'pu2', status: 'ACTIVE', payoutPhone: null, user: { role: 'TRAVELER' } } };
     const c = ready(booking({ escrowVault: { platformFee: 1000 } }), [trav, hostRef()]);
     c.tx.partnerCommission.aggregate.mockResolvedValueOnce({ _sum: { amount: 0 } }).mockResolvedValueOnce({ _sum: { amount: 200 } });
     await c.service.accrueForBooking('b1');
@@ -283,5 +288,34 @@ describe('PartnersService.setPayoutDetails', () => {
     vi.spyOn(c.service, 'me').mockResolvedValue({} as never);
     await c.service.setPayoutDetails('u1', { channel: 'cm.orange', phone: '6 70 00 00 00', accountName: 'NGONO Awa' });
     expect(c.prisma.partnerProfile.update.mock.calls[0]![0].data).toMatchObject({ payoutChannel: 'cm.orange', payoutPhone: '+237670000000', payoutAccountName: 'NGONO Awa' });
+  });
+});
+
+describe('PartnersService.me — éligibilité', () => {
+  it("un compte de l'équipe ne peut pas activer le programme", async () => {
+    const c = make();
+    c.prisma.partnerProfile.findUnique.mockResolvedValue(null);
+    c.prisma.user.findUnique.mockResolvedValue({ role: 'ADMIN' });
+    await expect(c.service.me('u1')).resolves.toMatchObject({ canActivate: false, blockedReason: 'STAFF', partner: null });
+  });
+  it('un utilisateur ordinaire peut activer', async () => {
+    const c = make();
+    c.prisma.partnerProfile.findUnique.mockResolvedValue(null);
+    c.prisma.user.findUnique.mockResolvedValue({ role: 'TRAVELER' });
+    await expect(c.service.me('u1')).resolves.toMatchObject({ canActivate: true, blockedReason: null });
+  });
+  it("un partenaire nommé dans l'équipe : commissions suspendues, compte conservé", async () => {
+    const c = make();
+    c.prisma.partnerProfile.findUnique.mockResolvedValue({ id: 'pa1', code: 'ABC234', status: 'ACTIVE', termsVersion: '2026-10', payoutChannel: null, payoutPhone: null, payoutAccountName: null, payoutUpdatedAt: null });
+    c.prisma.user.findUnique.mockResolvedValue({ fullName: 'Awa Ngono', kycStatus: 'APPROVED', role: 'ADMIN' });
+    const me = await c.service.me('u1');
+    expect(me.partner).toMatchObject({ earning: false, earningBlockedReason: 'STAFF' });
+  });
+  it('un partenaire ordinaire gagne', async () => {
+    const c = make();
+    c.prisma.partnerProfile.findUnique.mockResolvedValue({ id: 'pa1', code: 'ABC234', status: 'ACTIVE', termsVersion: '2026-10', payoutChannel: null, payoutPhone: null, payoutAccountName: null, payoutUpdatedAt: null });
+    c.prisma.user.findUnique.mockResolvedValue({ fullName: 'Awa Ngono', kycStatus: 'NOT_SUBMITTED', role: 'TRAVELER' });
+    const me = await c.service.me('u1');
+    expect(me.partner).toMatchObject({ earning: true, earningBlockedReason: null });
   });
 });

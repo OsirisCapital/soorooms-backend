@@ -37,7 +37,7 @@ export class PartnersAdminService {
     const rows = await this.prisma.partnerProfile.findMany({
       orderBy: { createdAt: 'desc' },
       take: 300,
-      include: { user: { select: { fullName: true, phone: true, kycStatus: true } }, _count: { select: { referrals: true } } },
+      include: { user: { select: { fullName: true, phone: true, kycStatus: true, role: true } }, _count: { select: { referrals: true } } },
     });
     const [earned, reserved] = await Promise.all([
       this.prisma.partnerCommission.groupBy({ by: ['partnerId'], _sum: { amount: true } }),
@@ -54,6 +54,7 @@ export class PartnersAdminService {
       fullName: p.user.fullName,
       phone: p.user.phone,
       kycStatus: p.user.kycStatus,
+      isStaff: p.user.role === 'ADMIN',
       userId: p.userId,
       referrals: p._count.referrals,
       earned: e.get(p.id) ?? 0,
